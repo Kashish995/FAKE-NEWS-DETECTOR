@@ -1,10 +1,16 @@
 import streamlit as st
 import pickle
 import numpy as np
+import os
 import matplotlib.pyplot as plt
 from wordcloud import WordCloud
 import requests
 from sklearn.metrics.pairwise import cosine_similarity
+
+# Minimum article length (in words) the model was actually trained to handle.
+# Below this, predictions are unreliable and the app should say so honestly
+# instead of confidently guessing.
+MIN_WORDS_FOR_RELIABLE_PREDICTION = 40
 
 # ---------- FONT ----------
 st.markdown("""
@@ -28,17 +34,38 @@ model = pickle.load(open("model/model.pkl", "rb"))
 vectorizer = pickle.load(open("model/vectorizer.pkl", "rb"))
 
 # ---------- NEWS API FUNCTION ----------
+# API key is read from an environment variable (or Streamlit secrets),
+# never hardcoded in the source file. Set it before running:
+#   export NEWSAPI_KEY="your_key_here"        (Mac/Linux)
+#   setx NEWSAPI_KEY "your_key_here"           (Windows, new terminal after)
+# or add it to .streamlit/secrets.toml as: NEWSAPI_KEY = "your_key_here"
+def get_api_key():
+    key = os.environ.get("NEWSAPI_KEY")
+    if not key:
+        try:
+            key = st.secrets["NEWSAPI_KEY"]
+        except Exception:
+            key = None
+    return key
+
 def get_latest_news(query):
-    api_key = " b53502f34fa046f3ae2e05f550967292"   # 🔴 PUT YOUR API KEY HERE
+    api_key = get_api_key()
+    if not api_key:
+        st.warning("NewsAPI key not configured — related real-news suggestions are unavailable.")
+        return []
 
     url = f"https://newsapi.org/v2/everything?q={query}&apiKey={api_key}"
 
-    response = requests.get(url)
-    data = response.json()
+    try:
+        response = requests.get(url, timeout=5)
+        data = response.json()
+    except requests.RequestException:
+        st.warning("Could not reach NewsAPI right now.")
+        return []
 
     articles = []
 
-    if data["status"] == "ok":
+    if data.get("status") == "ok":
         for article in data["articles"][:3]:
             articles.append({
                 "title": article["title"],
@@ -78,6 +105,14 @@ if st.button("Analyze News"):
     if news.strip() == "":
         st.warning("Please enter news text")
     else:
+        word_count = len(news.split())
+        if word_count < MIN_WORDS_FOR_RELIABLE_PREDICTION:
+            st.info(
+                f"⚠️ This model was trained on full-length news articles, not short statements "
+                f"({word_count} words entered, {MIN_WORDS_FOR_RELIABLE_PREDICTION}+ recommended). "
+                f"The prediction below may be unreliable for short factual claims — treat it as a "
+                f"style-based guess, not a fact-check."
+            )
 
         vector = vectorizer.transform([news])
 
