@@ -1,0 +1,13 @@
+Model used: SVM (LinearSVC)
+Accuracy: 98.59%
+Precision: 98.38%
+Recall: 99.03%
+F1 Score: 98.71%
+Confusion Matrix [0=Fake,1=Real]:
+[[3523   59]
+ [  56 4183]]
+
+All models compared:
+  Naive Bayes: acc=93.70% prec=93.38% rec=95.12% f1=94.24%
+  SVM (LinearSVC): acc=98.59% prec=98.38% rec=99.03% f1=98.71%
+  Logistic Regression: acc=97.94% prec=97.64% rec=98.58% f1=98.11%
