@@ -2,7 +2,7 @@ import re
 import pandas as pd
 import pickle
 from sklearn.model_selection import train_test_split
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer, ENGLISH_STOP_WORDS
 from sklearn.linear_model import LogisticRegression
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.svm import LinearSVC
@@ -59,7 +59,21 @@ y = data["label"]
 # ---------------------------------------------------------------
 # STEP 4: TF-IDF vectorization
 # ---------------------------------------------------------------
-vectorizer = TfidfVectorizer(stop_words="english", max_df=0.9, min_df=3)
+custom_stop_words = [
+    "said", "told", "says", "reporting", "reports", "spokesman", "spokeswoman", "statement", "added",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december",
+    "mon", "tue", "wed", "thu", "fri", "sat", "sun", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "oct", "nov", "dec"
+]
+all_stop_words = list(ENGLISH_STOP_WORDS) + custom_stop_words
+
+vectorizer = TfidfVectorizer(
+    stop_words=all_stop_words,
+    ngram_range=(1, 2),
+    max_df=0.9,
+    min_df=5,
+    max_features=8000
+)
 X_vectorized = vectorizer.fit_transform(X)
 
 # ---------------------------------------------------------------
@@ -74,8 +88,8 @@ X_train, X_test, y_train, y_test = train_test_split(
 # ---------------------------------------------------------------
 candidates = {
     "Naive Bayes": MultinomialNB(),
-    "SVM (LinearSVC)": LinearSVC(random_state=42),
-    "Logistic Regression": LogisticRegression(max_iter=1000),
+    "SVM (LinearSVC)": LinearSVC(C=0.1, random_state=42),
+    "Logistic Regression": LogisticRegression(C=0.1, max_iter=1000),
 }
 
 results = {}
@@ -109,7 +123,7 @@ best_model = results[best_name]["model"]
 # Wrap SVM with probability calibration
 if best_name == "SVM (LinearSVC)":
     print("\nWrapping SVM with probability calibration so app.py can show a confidence score...")
-    best_model = CalibratedClassifierCV(LinearSVC(random_state=42), cv=3)
+    best_model = CalibratedClassifierCV(LinearSVC(C=0.1, random_state=42), cv=3)
     best_model.fit(X_train, y_train)
 
 print("\n" + "=" * 55)

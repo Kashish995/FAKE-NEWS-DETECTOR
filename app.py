@@ -11,6 +11,16 @@ import pandas as pd
 import re
 from bs4 import BeautifulSoup
 
+# Source leakage cleaning pattern (matching train_model.py)
+dateline_pattern = re.compile(r'^[A-Z][A-Za-z\.\s/]{2,40}\(Reuters\)\s*-\s*')
+reuters_word_pattern = re.compile(r'\bReuters\b', re.IGNORECASE)
+
+def strip_source_leakage(text):
+    text = str(text)
+    text = dateline_pattern.sub('', text, count=1)
+    text = reuters_word_pattern.sub('', text)
+    return text
+
 # Minimum article length (in words) the model was actually trained to handle.
 MIN_WORDS_FOR_RELIABLE_PREDICTION = 40
 
@@ -741,8 +751,9 @@ with tab_detector:
             st.session_state.news_input = news_text
             word_count = len(news_text.split())
             
-            # Predict stylistic properties using ML model
-            vector = vectorizer.transform([news_text])
+            # Predict stylistic properties using ML model (with identical preprocessing)
+            cleaned_input = strip_source_leakage(news_text)
+            vector = vectorizer.transform([cleaned_input])
             prediction = model.predict(vector)[0]
             probability = model.predict_proba(vector)[0]
 
@@ -1054,7 +1065,8 @@ with tab_batch:
                             predictions.append("Empty")
                             confidences.append(0.0)
                         else:
-                            vec_row = vectorizer.transform([text_val])
+                            cleaned_val = strip_source_leakage(text_val)
+                            vec_row = vectorizer.transform([cleaned_val])
                             pred = model.predict(vec_row)[0]
                             prob = model.predict_proba(vec_row)[0]
                             if pred == 0:
