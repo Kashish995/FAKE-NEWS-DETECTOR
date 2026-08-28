@@ -774,11 +774,18 @@ with tab_detector:
             st.session_state.credibility_score = cred_score
             st.session_state.detected_sources = sources
 
-            # 3. Dynamic verification with NewsAPI Search (Proper Noun / Entity Extraction)
+            # 3. Dynamic verification with NewsAPI Search (Smart Frequency-Based Entity Extraction)
             entities = re.findall(r'\b[A-Z][a-zA-Z]+\b', news_text)
-            seen = set()
-            unique_entities = [x for x in entities if not (x.lower() in seen or seen.add(x.lower()))]
-            keywords = " ".join(unique_entities[:4]) if unique_entities else " ".join(news_text.split()[:5])
+            ignored_words = {
+                "the", "a", "an", "and", "sources", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+                "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"
+            }
+            filtered_entities = [w for w in entities if w.lower() not in ignored_words]
+            counts = {}
+            for w in filtered_entities:
+                counts[w] = counts.get(w, 0) + 1
+            sorted_entities = sorted(counts.keys(), key=lambda x: counts[x], reverse=True)
+            keywords = " ".join(sorted_entities[:5]) if sorted_entities else " ".join(news_text.split()[:5])
             
             articles = get_latest_news(keywords)
             st.session_state.related_articles = articles
