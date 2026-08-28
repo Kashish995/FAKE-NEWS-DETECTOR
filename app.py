@@ -801,6 +801,14 @@ with tab_detector:
                         conf = 0.80
                         probability = np.array([0.80, 0.20])
                         override_reason = f"⚠️ **Verification Override**: Extremely low semantic overlap ({round(max_verification_sim*100, 2)}%) with active reports. Real-time news searches indicate this claim is unsupported, despite having a formal writing style."
+                elif pred_lbl == "Fake":
+                    # If model thinks style is Fake (e.g. because of sensationalist terms like 'alive' or 'truth'),
+                    # but we find a strong match with verified reports on the live internet.
+                    if articles and max_verification_sim >= 0.35:
+                        pred_lbl = "Real"
+                        conf = max_verification_sim
+                        probability = np.array([1.0 - max_verification_sim, max_verification_sim])
+                        override_reason = f"✅ **Verification Override**: Although the writing style contains sensationalist/speculative markers, a high semantic overlap ({round(max_verification_sim*100, 2)}%) was found with verified live news reports (e.g., '{articles[0]['title']}'). This confirms the reported event is real."
             else:
                 if word_count < 15:
                     override_reason = "ℹ️ **Linguistic Style Check Only**: NewsAPI key is not configured. The model is classifying the *writing style* (formal vs clickbait), not verifying the *truth* of the facts. Short statements cannot be verified without an API key."
@@ -835,6 +843,19 @@ with tab_detector:
             ⚠️ <b>System Alert</b>: Input length ({word_count} words) is below recommended threshold ({MIN_WORDS_FOR_RELIABLE_PREDICTION}+). Style heuristics might show low accuracy.
             </div>
             """, unsafe_allow_html=True)
+
+        # Render a single clear, high-contrast verdict banner at the top
+        verdict_color = "#ef4444" if st.session_state.pred_label == "Fake" else "#22c55e"
+        verdict_text = "FAKE / UNVERIFIED" if st.session_state.pred_label == "Fake" else "REAL / VERIFIED"
+        
+        st.markdown(f"""
+        <div style="background-color: rgba(15, 23, 42, 0.4); border: 2px solid {verdict_color}; padding: 18px; border-radius: 8px; text-align: center; margin-bottom: 25px;">
+            <span style="color: #94a3b8; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px;">Final System Verdict</span>
+            <h1 style="color: {verdict_color} !important; font-size: 32px !important; font-weight: 800 !important; margin: 8px 0 0 0 !important; border: none !important; padding: 0 !important; letter-spacing: 1px;">
+                {verdict_text}
+            </h1>
+        </div>
+        """, unsafe_allow_html=True)
 
         col1, col2 = st.columns(2)
 
