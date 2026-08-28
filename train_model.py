@@ -1,12 +1,13 @@
 import re
 import pandas as pd
 import pickle
+import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.svm import LinearSVC
-from sklearn.calibration import CalibratedClassifierCV
+from sklearn.calibration import CalibratedClassifierCV, calibration_curve
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 
 # ---------------------------------------------------------------
@@ -57,17 +58,21 @@ X = data["combined"]
 y = data["label"]
 
 # ---------------------------------------------------------------
-# STEP 4: TF-IDF vectorization
+# STEP 4: Train/test split FIRST to prevent TF-IDF data leakage
 # ---------------------------------------------------------------
-vectorizer = TfidfVectorizer(stop_words="english", max_df=0.9, min_df=3)
-X_vectorized = vectorizer.fit_transform(X)
+X_train_raw, X_test_raw, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
 
 # ---------------------------------------------------------------
-# STEP 5: Train/test split (stratified so class balance matches)
+# STEP 5: TF-IDF vectorization (fit ON X_train ONLY, transform X_test)
 # ---------------------------------------------------------------
-X_train, X_test, y_train, y_test = train_test_split(
-    X_vectorized, y, test_size=0.2, random_state=42, stratify=y
-)
+vectorizer = TfidfVectorizer(stop_words="english", max_df=0.9, min_df=3)
+X_train = vectorizer.fit_transform(X_train_raw)
+X_test = vectorizer.transform(X_test_raw)
+
+# Calculate mean feature vector over training corpus for exact Linear SHAP baseline
+bg_mean = np.asarray(X_train.mean(axis=0)).ravel()
 
 # ---------------------------------------------------------------
 # STEP 6: Train and evaluate Naive Bayes, SVM, and Logistic Regression
@@ -106,9 +111,9 @@ for name, clf in candidates.items():
 best_name = max(results, key=lambda k: results[k]["f1"])
 best_model = results[best_name]["model"]
 
-# Wrap SVM with probability calibration
+# Wrap SVM with probability calibration if it's the best model
 if best_name == "SVM (LinearSVC)":
-    print("\nWrapping SVM with probability calibration so app.py can show a confidence score...")
+    print("\nWrapping SVM with probability calibration for probability outputs...")
     best_model = CalibratedClassifierCV(LinearSVC(random_state=42), cv=3)
     best_model.fit(X_train, y_train)
 
@@ -125,16 +130,31 @@ print("\nConfusion Matrix (rows=actual, cols=predicted) [0=Fake, 1=Real]")
 print(cm)
 
 # Calculate and save reliability calibration curve coordinates
-from sklearn.calibration import calibration_curve
 probs = best_model.predict_proba(X_test)[:, 1]
 fraction_of_positives, mean_predicted_value = calibration_curve(y_test, probs, n_bins=10)
 pickle.dump((fraction_of_positives, mean_predicted_value), open("model/calibration.pkl", "wb"))
+pickle.dump(bg_mean, open("model/bg_mean.pkl", "wb"))
 
 # ---------------------------------------------------------------
-# STEP 8: Save the best model + vectorizer
+# STEP 8: Save artifacts, vectorizer, and dynamic metrics object
 # ---------------------------------------------------------------
 pickle.dump(best_model, open("model/model.pkl", "wb"))
 pickle.dump(vectorizer, open("model/vectorizer.pkl", "wb"))
+
+metrics_artifact = {
+    "models": {
+        name: {
+            "accuracy": round(r["accuracy"] * 100, 2),
+            "precision": round(r["precision"] * 100, 2),
+            "recall": round(r["recall"] * 100, 2),
+            "f1": round(r["f1"] * 100, 2),
+        }
+        for name, r in results.items()
+    },
+    "best_model_name": best_name,
+    "confusion_matrix": cm.tolist(),
+}
+pickle.dump(metrics_artifact, open("model/metrics.pkl", "wb"))
 
 with open("model/metrics.txt", "w") as f:
     f.write(f"Model used: {best_name}\n")
@@ -148,4 +168,4 @@ with open("model/metrics.txt", "w") as f:
         f.write(f"  {name}: acc={r['accuracy']*100:.2f}% prec={r['precision']*100:.2f}% "
                 f"rec={r['recall']*100:.2f}% f1={r['f1']*100:.2f}%\n")
 
-print("\nModel trained and saved successfully! (metrics also written to model/metrics.txt)")
+print("\nModel trained and saved successfully without TF-IDF data leakage! (artifacts updated in model/)")

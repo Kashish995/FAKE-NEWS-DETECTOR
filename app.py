@@ -560,7 +560,7 @@ if st.session_state.username is None:
     st.write("Please log in with your name or roll number to activate the diagnostics session.")
     
     with st.form("login_form"):
-        user_input = st.text_input("Enter Username", placeholder="e.g. Divya")
+        user_input = st.text_input("Enter Username", placeholder="e.g. Your Name")
         submit_login = st.form_submit_button("Access Capstone Dashboard")
         if submit_login:
             if user_input.strip() == "":
