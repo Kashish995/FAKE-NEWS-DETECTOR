@@ -763,8 +763,12 @@ with tab_detector:
             st.session_state.credibility_score = cred_score
             st.session_state.detected_sources = sources
 
-            # 3. Dynamic verification with NewsAPI Search
-            keywords = " ".join(news_text.split()[:5])
+            # 3. Dynamic verification with NewsAPI Search (Smart Keyword Extraction)
+            stop_words = {"is", "a", "the", "on", "in", "to", "for", "of", "and", "by", "with", "at", "from", "that", "this", "it", "he", "she", "they", "we", "sources", "according"}
+            words = [re.sub(r'[^\w]', '', w) for w in news_text.split()]
+            clean_words = [w for w in words if w.lower() not in stop_words and len(w) > 2]
+            keywords = " ".join(clean_words[:6]) if clean_words else " ".join(news_text.split()[:5])
+            
             articles = get_latest_news(keywords)
             st.session_state.related_articles = articles
             
@@ -806,11 +810,12 @@ with tab_detector:
                 elif pred_lbl == "Fake":
                     # If model thinks style is Fake (e.g. because of sensationalist terms like 'alive' or 'truth'),
                     # but we find a strong match with verified reports on the live internet.
-                    if articles and max_verification_sim >= 0.35:
+                    if articles and max_verification_sim >= 0.15:
                         pred_lbl = "Real"
-                        conf = max_verification_sim
-                        probability = np.array([1.0 - max_verification_sim, max_verification_sim])
-                        override_reason = f"✅ **Verification Override**: Although the writing style contains sensationalist/speculative markers, a high semantic overlap ({round(max_verification_sim*100, 2)}%) was found with verified live news reports (e.g., '{articles[0]['title']}'). This confirms the reported event is real."
+                        # Set confidence score high based on the verified match
+                        conf = max(0.85, max_verification_sim)
+                        probability = np.array([1.0 - conf, conf])
+                        override_reason = f"✅ **Verification Override**: Although the writing style contains speculative or informal markers, a valid semantic overlap ({round(max_verification_sim*100, 2)}%) was found with verified live news reports (e.g., '{articles[0]['title']}'). This confirms the reported event is real."
             else:
                 if word_count < 15:
                     override_reason = "ℹ️ **Linguistic Style Check Only**: NewsAPI key is not configured. The model is classifying the *writing style* (formal vs clickbait), not verifying the *truth* of the facts. Short statements cannot be verified without an API key."
