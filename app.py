@@ -763,21 +763,23 @@ with tab_detector:
             st.session_state.credibility_score = cred_score
             st.session_state.detected_sources = sources
 
-            # 3. Dynamic verification with NewsAPI Search (Smart Keyword Extraction)
-            stop_words = {"is", "a", "the", "on", "in", "to", "for", "of", "and", "by", "with", "at", "from", "that", "this", "it", "he", "she", "they", "we", "sources", "according"}
-            words = [re.sub(r'[^\w]', '', w) for w in news_text.split()]
-            clean_words = [w for w in words if w.lower() not in stop_words and len(w) > 2]
-            keywords = " ".join(clean_words[:6]) if clean_words else " ".join(news_text.split()[:5])
+            # 3. Dynamic verification with NewsAPI Search (Proper Noun / Entity Extraction)
+            entities = re.findall(r'\b[A-Z][a-zA-Z]+\b', news_text)
+            seen = set()
+            unique_entities = [x for x in entities if not (x.lower() in seen or seen.add(x.lower()))]
+            keywords = " ".join(unique_entities[:4]) if unique_entities else " ".join(news_text.split()[:5])
             
             articles = get_latest_news(keywords)
             st.session_state.related_articles = articles
             
             sim_score = None
             if articles:
-                real_text = articles[0]["title"]
                 vec1 = vectorizer.transform([news_text])
-                vec2 = vectorizer.transform([real_text])
-                sim_score = float(cosine_similarity(vec1, vec2)[0][0])
+                sims = []
+                for art in articles[:3]:
+                    vec2 = vectorizer.transform([art["title"]])
+                    sims.append(float(cosine_similarity(vec1, vec2)[0][0]))
+                sim_score = max(sims)
                 st.session_state.similarity_score = sim_score
             else:
                 st.session_state.similarity_score = None
