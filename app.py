@@ -524,7 +524,7 @@ def get_api_key():
         try:
             key = st.secrets["NEWSAPI_KEY"]
         except Exception:
-            key = "17bd93c6388d402e85cc7ce2a7e90ea"
+            key = "e4c72f7400494e53bf6271803d3c6e5f"
     return key
 
 def get_latest_news(query):
@@ -588,8 +588,10 @@ st.sidebar.markdown(f"""
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🔑 NewsAPI Configuration")
+if not st.session_state.get("newsapi_key"):
+    st.sidebar.info("✅ Default System Key is active. You do not need to provide one.")
 # Custom developer key input field
-user_key = st.sidebar.text_input("Custom NewsAPI Key", value=st.session_state.get("newsapi_key", ""), type="password", key="newsapi_key_override")
+user_key = st.sidebar.text_input("Custom NewsAPI Key (Optional)", value=st.session_state.get("newsapi_key", ""), type="password", key="newsapi_key_override")
 if user_key.strip():
     if st.session_state.get("newsapi_key") != user_key.strip():
         st.session_state.newsapi_key = user_key.strip()
@@ -1001,20 +1003,21 @@ with tab_detector:
                         f'{round(height*100, 1)}%', ha='center', va='bottom', color='#0f172a' if height > 0.1 else '#64748b', fontweight='bold', fontsize=8)
             st.pyplot(fig)
 
-        # Token highlights
+        # Token highlights wrapped in an expander to avoid clutter/confusion
         st.write("---")
-        st.subheader("🧠 Explainable AI: Feature Weight Highlight Visualizer")
-        st.markdown(
-            "The model highlights individual words that influenced the classification boundary. "
-            "Words highlighted in <span style='background-color:rgba(255, 77, 77, 0.25); padding:1px 3px; border-radius:3px; color:#ff4d4d; font-weight:bold;'>Red</span> represent stylistic markers of **sensationalism/clickbait** (Fake). "
-            "Words highlighted in <span style='background-color:rgba(0, 255, 102, 0.15); padding:1px 3px; border-radius:3px; color:#00ff66; font-weight:bold;'>Green</span> represent markers of **reliable/neutral reporting** (Real).",
-            unsafe_allow_html=True
-        )
+        with st.expander("🔍 Show Word-by-Word Explainable AI Highlights (Advanced Diagnostics)", expanded=False):
+            st.subheader("🧠 Explainable AI: Feature Weight Highlight Visualizer")
+            st.markdown(
+                "The model highlights individual words that influenced the classification boundary. "
+                "Words highlighted in <span style='background-color:rgba(255, 77, 77, 0.25); padding:1px 3px; border-radius:3px; color:#ff4d4d; font-weight:bold;'>Red</span> represent stylistic markers of **sensationalism/clickbait** (Fake). "
+                "Words highlighted in <span style='background-color:rgba(0, 255, 102, 0.15); padding:1px 3px; border-radius:3px; color:#00ff66; font-weight:bold;'>Green</span> represent markers of **reliable/neutral reporting** (Real).",
+                unsafe_allow_html=True
+            )
 
-        fake_words, real_words = explain_text(st.session_state.analyzed_text, model, vectorizer)
-        highlighted_html = get_highlighted_text(st.session_state.analyzed_text, fake_words, real_words)
-        
-        st.markdown(f'<div style="background-color: rgba(148,163,184,0.05); border: 1px solid rgba(148,163,184,0.2); padding: 22px; border-radius: 8px; line-height: 1.8; max-height: 400px; overflow-y: auto; color:inherit; font-family:inherit;">{highlighted_html}</div>', unsafe_allow_html=True)
+            fake_words, real_words = explain_text(st.session_state.analyzed_text, model, vectorizer)
+            highlighted_html = get_highlighted_text(st.session_state.analyzed_text, fake_words, real_words)
+            
+            st.markdown(f'<div style="background-color: rgba(148,163,184,0.05); border: 1px solid rgba(148,163,184,0.2); padding: 22px; border-radius: 8px; line-height: 1.8; max-height: 400px; overflow-y: auto; color:inherit; font-family:inherit;">{highlighted_html}</div>', unsafe_allow_html=True)
 
 # =========================================================================
 # TAB 2: BATCH CSV PROCESSING CORE
