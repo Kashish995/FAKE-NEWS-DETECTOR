@@ -220,7 +220,12 @@ def get_analytics_data(target_user=None):
 def scrape_article(url):
     try:
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.google.com/",
+            "Connection": "keep-alive",
+            "Cache-Control": "max-age=0"
         }
         response = requests.get(url, headers=headers, timeout=8)
         if response.status_code != 200:
@@ -561,6 +566,10 @@ def get_latest_news(query):
     return articles
 
 # ---------- USER AUTH PORTAL ROUTINES ----------
+# Maintain username session across browser refreshes using URL query parameters
+if "username" in st.query_params:
+    st.session_state.username = st.query_params["username"]
+
 if "username" not in st.session_state:
     st.session_state.username = None
 
@@ -577,6 +586,7 @@ if st.session_state.username is None:
                 st.error("Access Denied: Username cannot be blank.")
             else:
                 st.session_state.username = user_input.strip()
+                st.query_params["username"] = user_input.strip()
                 st.success(f"Access Granted. Session mapped to: {st.session_state.username}")
                 st.rerun()
     st.stop() # Abort printing regular UI tabs
@@ -640,6 +650,7 @@ else:
 
 if st.sidebar.button("Log Out of Core"):
     st.session_state.username = None
+    st.query_params.clear()
     st.rerun()
 
 st.sidebar.markdown("---")
@@ -774,18 +785,15 @@ with tab_detector:
             st.session_state.credibility_score = cred_score
             st.session_state.detected_sources = sources
 
-            # 3. Dynamic verification with NewsAPI Search (Smart Frequency-Based Entity Extraction)
-            entities = re.findall(r'\b[A-Z][a-zA-Z]+\b', news_text)
-            ignored_words = {
-                "the", "a", "an", "and", "sources", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
-                "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"
+            # 3. Dynamic verification with NewsAPI Search (Smart Headline-Based Topic Extraction)
+            first_sentence = news_text.split('.')[0] if '.' in news_text else news_text
+            words_in_topic = [re.sub(r'[^\w\s]', '', w) for w in first_sentence.split()[:7]]
+            ignored_search = {
+                "the", "a", "an", "and", "or", "in", "on", "at", "to", "for", "with", "by", "of",
+                "live", "updates", "breaking", "update", "latest", "says", "report", "reported"
             }
-            filtered_entities = [w for w in entities if w.lower() not in ignored_words]
-            counts = {}
-            for w in filtered_entities:
-                counts[w] = counts.get(w, 0) + 1
-            sorted_entities = sorted(counts.keys(), key=lambda x: counts[x], reverse=True)
-            keywords = " ".join(sorted_entities[:5]) if sorted_entities else " ".join(news_text.split()[:5])
+            filtered_words = [w for w in words_in_topic if w.lower() not in ignored_search and w.strip()]
+            keywords = " ".join(filtered_words) if filtered_words else " ".join(news_text.split()[:4])
             
             articles = get_latest_news(keywords)
             st.session_state.related_articles = articles
@@ -818,15 +826,21 @@ with tab_detector:
                 if pred_lbl == "Real":
                     # If model thinks style is Real, but no online source matches this claim
                     if not articles and lc_sim < 0.15:
-                        pred_lbl = "Fake"
-                        conf = 0.85
-                        probability = np.array([0.85, 0.15])
-                        override_reason = "⚠️ **Verification Override**: Zero matching reports found on the live internet. Information retrieval suggests this claim is unverified or fabricated, despite having a formal writing style."
+                        if conf < 0.70: # Only override if the ML model's styling confidence is weak
+                            pred_lbl = "Fake"
+                            conf = 0.85
+                            probability = np.array([0.85, 0.15])
+                            override_reason = "⚠️ **Verification Override**: Zero matching reports found on the live internet. Information retrieval suggests this claim is unverified or fabricated, despite having a formal writing style."
+                        else:
+                            override_reason = "ℹ️ **Factual Context Note**: No recent online reports found matching this topic (news may be historical, local, or specialized). Displaying classification based on writing style."
                     elif max_verification_sim < 0.15:
-                        pred_lbl = "Fake"
-                        conf = 0.80
-                        probability = np.array([0.80, 0.20])
-                        override_reason = f"⚠️ **Verification Override**: Extremely low semantic overlap ({round(max_verification_sim*100, 2)}%) with active reports. Real-time news searches indicate this claim is unsupported, despite having a formal writing style."
+                        if conf < 0.70: # Only override if the ML model's styling confidence is weak
+                            pred_lbl = "Fake"
+                            conf = 0.80
+                            probability = np.array([0.80, 0.20])
+                            override_reason = f"⚠️ **Verification Override**: Extremely low semantic overlap ({round(max_verification_sim*100, 2)}%) with active reports. Real-time news searches indicate this claim is unsupported, despite having a formal writing style."
+                        else:
+                            override_reason = f"ℹ️ **Factual Context Note**: Low semantic overlap ({round(max_verification_sim*100, 2)}%) with active news feeds (may reference historical or niche events). Displaying classification based on writing style."
                 elif pred_lbl == "Fake":
                     # If model thinks style is Fake (e.g. because of sensationalist terms like 'alive' or 'truth'),
                     # but we find a strong match with verified reports on the live internet.
