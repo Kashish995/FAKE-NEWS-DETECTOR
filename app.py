@@ -909,15 +909,6 @@ with tab_detector:
 
     # Display results if prediction is stored in session state
     if st.session_state.analyzed_text:
-        word_count = len(st.session_state.analyzed_text.split())
-        
-        # Render warning if text is too short
-        if word_count < MIN_WORDS_FOR_RELIABLE_PREDICTION:
-            st.markdown(f"""
-            <div style="background-color:rgba(255,165,0,0.1); border:1px solid orange; padding:10px; border-radius:4px; margin-bottom:15px; font-size:13px; color:#ffb03b;">
-            ⚠️ <b>System Alert</b>: Input length ({word_count} words) is below recommended threshold ({MIN_WORDS_FOR_RELIABLE_PREDICTION}+). Style heuristics might show low accuracy.
-            </div>
-            """, unsafe_allow_html=True)
 
         # Render a single clear, high-contrast verdict banner at the top
         verdict_color = "#ef4444" if st.session_state.pred_label == "Fake" else "#22c55e"
@@ -1239,31 +1230,67 @@ with tab_perf:
 # =========================================================================
 with tab_logs:
     st.title("💾 System Telemetry & Relational Query Database")
-    st.write("Direct queries from the SQLite `predictions` and `live_corpus` schema tables.")
+    st.write("Secure SQL database logging user evaluation sessions.")
 
-    # Filter logs per user or view all
-    # Filter logs per user or view all, with deletion controls
+    # Admin Passcode State
+    if "admin_authenticated" not in st.session_state:
+        st.session_state.admin_authenticated = False
+
+    with st.sidebar.expander("🔐 Admin Database Security", expanded=False):
+        st.write("Enter administrative passcode to unlock full system logs or manage relational records.")
+        admin_pass_input = st.text_input("Admin Passcode", type="password", key="admin_pin_input")
+        if st.button("Authenticate Admin"):
+            if admin_pass_input in ["admin2026", "1234", "admin"]:
+                st.session_state.admin_authenticated = True
+                st.success("Admin Authorization Granted.")
+                st.rerun()
+            else:
+                st.error("Invalid Admin Passcode.")
+        if st.session_state.admin_authenticated:
+            if st.button("Revoke Admin Access"):
+                st.session_state.admin_authenticated = False
+                st.rerun()
+
+    # User isolation & admin controls
     col_view, col_del = st.columns([3, 1])
     with col_view:
-        view_mode = st.radio("LOG VIEW PRIVILEGE", ["👤 View My Personal Logs Only", "🖥️ View All System Logs (Admin)"], horizontal=True)
+        if st.session_state.admin_authenticated:
+            view_mode = st.radio("LOG ACCESS PRIVILEGE (ADMIN UNLOCKED 🔓)", ["👤 View My Personal Logs Only", "🖥️ View All System Logs (Admin)"], horizontal=True)
+        else:
+            view_mode = "👤 View My Personal Logs Only"
+            st.info(f"🔒 **User Isolation Active**: Viewing evaluation records for `👤 {st.session_state.username}`. Full system logs and database maintenance are restricted to Admin.")
+    
     with col_del:
-        st.write("") # subtle padding
         st.write("")
-        if st.button("🗑️ Delete Log History", type="secondary"):
-            try:
-                conn = sqlite3.connect(DB_FILE)
-                c = conn.cursor()
-                if "View My Personal Logs" in view_mode:
+        st.write("")
+        if st.session_state.admin_authenticated:
+            if st.button("🗑️ Delete Log History", type="secondary"):
+                try:
+                    conn = sqlite3.connect(DB_FILE)
+                    c = conn.cursor()
+                    if "View My Personal Logs" in view_mode:
+                        c.execute("DELETE FROM predictions WHERE username = ?", (st.session_state.username,))
+                        st.success(f"Logs cleared for: {st.session_state.username}")
+                    else:
+                        c.execute("DELETE FROM predictions")
+                        st.success("All system logs cleared.")
+                    conn.commit()
+                    conn.close()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error clearing logs: {e}")
+        else:
+            if st.button("🗑️ Clear My Logs", type="secondary"):
+                try:
+                    conn = sqlite3.connect(DB_FILE)
+                    c = conn.cursor()
                     c.execute("DELETE FROM predictions WHERE username = ?", (st.session_state.username,))
-                    st.success(f"Logs cleared for: {st.session_state.username}")
-                else:
-                    c.execute("DELETE FROM predictions")
-                    st.success("All system logs cleared.")
-                conn.commit()
-                conn.close()
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error clearing logs: {e}")
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Cleared your personal logs, {st.session_state.username}.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error clearing personal logs: {e}")
     
     target_user = st.session_state.username if "View My Personal Logs" in view_mode else None
     metrics, df_logs = get_analytics_data(target_user)
