@@ -4,7 +4,7 @@ import pickle
 import numpy as np
 import re
 
-PROJECT_DIR = r"c:\Users\swain\OneDrive\Desktop\FAKE-NEWS-DETECTION"
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(PROJECT_DIR)
 
 MODEL_PATH = os.path.join(PROJECT_DIR, "model", "model.pkl")

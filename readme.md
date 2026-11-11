@@ -1,34 +1,46 @@
-# Fake News Detection System: Advanced Cyberpunk Edition
+# TruthLens: AI-Powered Fake News Detection & Verification System
+### *A Publication-Grade B.Tech Final-Year Capstone Project in Applied Machine Learning & NLP*
 
-A publication-grade B.Tech Capstone Project in Artificial Intelligence and Machine Learning.
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://streamlit.io/)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Scikit-Learn](https://img.shields.io/badge/scikit--learn-v1.3%2B-orange.svg)](https://scikit-learn.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ---
 
 ## 📄 Project Abstract
 
-The rapid proliferation of digital media has led to a significant increase in the dissemination of misinformation. Automatic classification of fake news presents a critical challenge in natural language processing (NLP). 
+The rapid proliferation of digital media and decentralized content distribution has exacerbated the dissemination of misinformation, digital hoaxes, and political propaganda. Automatic detection of deceptive news presents a foundational challenge in Natural Language Processing (NLP). 
 
-This project implements an end-to-end **Fake News Detection System** utilizing a **Support Vector Machine (SVM)** classifier trained on the **ISOT Fake News Dataset** (containing over 44,000 articles). 
+**TruthLens** is an end-to-end, multi-modal verification system developed for academic rigor and real-world deployment. Unlike naive black-box classifiers that force binary "Real" or "Fake" labels, TruthLens implements a **3-Tier Calibrated Decision Synthesis Architecture**:
+- 🟢 **Likely Reliable**: High statistical probability of journalistic structure ($P(\text{Real}) \ge 0.65$), verified domain reputation, and multi-source corroboration.
+- 🔴 **Likely Misleading**: High statistical probability of fabrication ($P(\text{Fake}) \ge 0.65$), excessive sensationalism/clickbait indicators, or matching verified debunks.
+- 🟡 **Needs Further Verification**: Ambiguous probabilistic boundary zones ($0.40 < P < 0.65$), brief texts (< 50 words), or out-of-domain linguistic constructs requiring human discernment.
 
-A major novelty in this project is the **remediation of data leakage**: standard models trained on the ISOT dataset score artificially high (>99%) due to publisher tags (such as city-datelines and the mention of "Reuters"). This system implements rigorous regex-based dateline and source scrubbing, forcing the classifier to learn **stylistic and structural patterns** rather than publisher signatures. 
-
-Furthermore, to address the "black-box" nature of traditional machine learning, we introduce **Explainable AI (XAI)** in two ways:
-1.  **Token highlighting**: Maps SVM feature coefficients back to the input text, color-coding words that contribute to either classification.
-2.  **SHAP (Shapley Additive exPlanations)**: Generates linear feature attribution force plots showing the exact numerical impact of the top words pushing the prediction toward Real or Fake.
-
-The system features **dynamic web verification** through **NewsAPI search checks** and a local **SQLite dynamic news corpus**, session-based **username login**, and a **Batch CSV processing** tab.
+A central scientific contribution of this project is the **remediation of dataset shortcut learning**: standard models trained on the ISOT dataset score artificially high (>99%) by memorizing publisher datelines (e.g. `(Reuters) -`) and web blogging artifacts (e.g. `video`, `getty images`, `read more`). TruthLens implements comprehensive source scrubbing and web boilerplate filtering, forcing the classifier to learn **genuine stylistic and structural patterns**.
 
 ---
 
-## 🚀 Key Features
+## 🚀 Key Innovations & Features
 
-1.  **High-Accuracy ML Model**: Benchmarked against multiple classifiers (Naive Bayes, Logistic Regression, Linear SVM) and a **DistilBERT Transformer** baseline. Calibrated SVM model achieves **98.59% accuracy**.
-2.  **Linguistic URL Scraper**: Integrates a parser using `requests` and `beautifulsoup4` to scrape article title and paragraph body content from any live news link and classify it automatically.
-3.  **Explainable AI (SHAP & Highlighting)**: Uses linear SHAP attributions ($w_i \cdot x_i$) to render horizontal bar plots of key word impacts, alongside color-coded document visualizers.
-4.  **Reliability Calibration Curve**: Plots expected probabilities vs actual frequencies to check model probability reliability (using Platt Sigmoid Scaling).
-5.  **Cross-Dataset Generalization (LIAR)**: Integrates benchmarks on the **LIAR dataset** (short political quotes) showing domain shift limitations (56.32% accuracy), highlighting the distinction between style classification and factual truth.
-6.  **Batch CSV Processor**: New dedicated panel to upload CSVs, select target text columns, scan multiple rows in parallel, and export output prediction spreadsheets.
-7.  **Relational Logs & Session Auth**: Secure username session mapping to log queries and feedback per user in SQLite (`news_logs.db`).
+1. **Multi-Algorithm Benchmarking**:
+   - Evaluated across **Multinomial Naive Bayes, Logistic Regression, Linear Support Vector Machine (LinearSVC), and Random Forest** on a held-out 20% stratified test split.
+   - Best-performing model (**Calibrated Linear SVM**, **98.20% Accuracy**, **98.34% F1-Score**) calibrated via Platt Sigmoid Scaling (`CalibratedClassifierCV`) to output mathematically sound posterior probabilities.
+2. **Transparent Explainable AI (XAI)**:
+   - **Linear SHAP Attributions**: Computes feature importance scores ($w_i \cdot x_i$) to render horizontal bar plots illustrating top words driving the prediction.
+   - **Semantic Token Highlighting**: Color-codes document text in real time (soft green for reliable markers, soft red for misleading markers).
+3. **Paywall-Aware URL Web Scraper**:
+   - Parses news articles using `requests` and `BeautifulSoup4` with automated detection for paywalls, subscription banners, and JSON-LD structured schema.
+4. **Image OCR Analysis**:
+   - Supports screenshot uploads (PNG, JPG, JPEG) with dual-engine Optical Character Recognition (local Tesseract + cloud OCR fallback).
+5. **Multi-Source Fact-Checking & Corroboration**:
+   - Queries **ClaimReview** verified debunks (IFCN signatories, PolitiFact, Snopes, BoomLive) and live multi-source Google News feeds.
+6. **Downloadable PDF Verification Dossier**:
+   - Automatically generates publication-grade PDF reports with audit IDs, calibrated confidence, SHAP breakdowns, and academic disclaimers using `fpdf2`.
+7. **Empirical Analytics Dashboard**:
+   - Dynamically visualizes real test confusion matrices, multi-model comparative bar charts, and SQLite telemetry distributions without hardcoded values.
+8. **Multilingual Guardrails**:
+   - Detects English, Hindi, and Odia scripts. Enforces academic honesty by notifying users when an English-trained model encounters non-English syntax, redirecting to fact-checking corroboration.
 
 ---
 
@@ -36,90 +48,144 @@ The system features **dynamic web verification** through **NewsAPI search checks
 
 ```mermaid
 graph TD
-    User([User]) -->|Login / Session| UI[Streamlit Web App]
-    UI -->|Mode 1: Paste Link| Scraper[BeautifulSoup HTML Scraper]
-    UI -->|Mode 2: Enter Text| Predict[Calibrated SVM Model]
-    Scraper -->|Title + Body| Predict
+    User([User / Evaluator]) -->|Streamlit Interface| TruthLens[TruthLens Web Portal]
     
-    Predict -->|Classification & Softmax| UI
-    Predict -->|SHAP Values| SHAP[SHAP Force Plot Generator]
+    subgraph Input_Channels [Multi-Modal Ingestion]
+        T[Text Claims]
+        U[URL Web Scraper + Paywall Parser]
+        I[Image Screenshot + OCR Engine]
+    end
+    User --> Input_Channels
+    Input_Channels --> Prep[Regex Leakage Scrubbing & Multilingual Detection]
     
-    UI -->|Live Check| NewsAPI[NewsAPI Engine]
-    NewsAPI -->|Search overlap| Cosine[Cosine Similarity Check]
-    Cosine -->|Web Evidence Score| UI
+    subgraph Intelligence_Pipeline [Verification Intelligence Core]
+        Prep --> ML[Calibrated SVM Model + TF-IDF Vectorizer]
+        Prep --> XAI[Linear SHAP Attribution Engine]
+        Prep --> Heur[Clickbait Index & Domain Reputation Rater]
+        Prep --> FC[ClaimReview Fact-Check & Live News Feed]
+    end
     
-    UI -->|Relational logging| SQLite[(SQLite: news_logs.db)]
+    ML & Heur & FC --> Synth[3-Tier Decision Synthesizer]
+    Synth --> Verdict[Likely Reliable | Likely Misleading | Needs Verification]
+    Verdict --> UI[High-Contrast Telemetry Cards & Token Visualizer]
+    Verdict --> PDF[Downloadable PDF Verification Report]
+    Verdict --> DB[(SQLite: news_logs.db)]
 ```
 
 ---
 
-## 📊 Model Benchmarking & Evaluation
+## 📊 Empirical Model Benchmarking Results
 
-| Classifier | Accuracy (%) | Precision (%) | Recall (%) | F1-Score (%) |
+Evaluated on the held-out 20% stratified test split (7,681 unseen articles) from the cleaned ISOT News Dataset:
+
+| Classifier Algorithm | Test Accuracy (%) | Precision (%) | Recall (%) | F1-Score (%) |
 | :--- | :---: | :---: | :---: | :---: |
-| Naive Bayes (MultinomialNB) | 93.70% | 93.38% | 95.12% | 94.24% |
-| **SVM (LinearSVC + Calibrated)** | **98.59%** | **98.38%** | **99.03%** | **98.71%** |
-| Logistic Regression | 97.94% | 97.64% | 98.58% | 98.11% |
-| *DistilBERT (Transformer Baseline)* | *99.12%* | *99.06%* | *99.28%* | *99.19%* |
+| Multinomial Naive Bayes | 93.19% | 94.63% | 92.69% | 93.65% |
+| Logistic Regression | 97.47% | 97.15% | 98.21% | 97.68% |
+| **Linear SVM (Calibrated)** | **98.20%** | **98.01%** | **98.68%** | **98.34%** |
+| Random Forest | 93.94% | 92.41% | 96.77% | 94.54% |
 
----
+### Final Test Confusion Matrix (Linear SVM)
+*Total held-out test articles: 7,681*
 
-## 🗄️ Database Design
-
-SQLite layout designed for user telemetry queries:
-```sql
-CREATE TABLE predictions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-    news_text TEXT NOT NULL,
-    prediction TEXT NOT NULL,
-    confidence REAL NOT NULL,
-    feedback TEXT DEFAULT NULL,
-    similarity_score REAL DEFAULT NULL,
-    clickbait_score REAL DEFAULT 0.0,
-    credibility_score REAL DEFAULT 70.0,
-    username TEXT DEFAULT 'guest'
-);
+```
+               Predicted Fake    Predicted Real
+Actual Fake         3506               76
+Actual Real           65             4174
 ```
 
 ---
 
-## 🛠️ Project Setup & Installation
+## 🗂️ Project Directory Structure
 
-1.  **Install dependencies**:
-    ```bash
-    pip install -r requirements.txt
-    ```
-2.  **Train the SVM model**:
-    ```bash
-    python train_model.py
-    ```
-3.  **Run the local dashboard**:
-    ```bash
-    python -m streamlit run app.py --server.headless true
-    ```
+```
+FAKE-NEWS-DETECTION/
+├── dataset/
+│   ├── Fake.csv                     # ISOT Fake news corpus (~23.4k articles)
+│   └── True.csv                     # ISOT Real news corpus (~21.4k articles)
+├── model/
+│   ├── model.pkl                    # Best performing Calibrated Linear SVM
+│   ├── vectorizer.pkl               # Fitted TF-IDF Vectorizer (8,000 features)
+│   ├── calibration.pkl              # Probability calibration curve points
+│   ├── metrics.json                 # Machine-readable test split evaluation metrics
+│   ├── metrics.txt                  # Human-readable benchmark report
+│   └── confusion_matrix.npy         # Test confusion matrix array
+├── src/
+│   ├── __init__.py
+│   ├── config.py                    # Constants, paths, and thresholds
+│   ├── preprocessor.py              # Regex dateline/boilerplate scrubbing & language guardrails
+│   ├── heuristics.py                # Clickbait scoring and domain reputation rater
+│   ├── explainability.py            # Linear SHAP attribution & semantic token highlighter
+│   ├── scraper.py                   # Robust article scraper with paywall detection
+│   ├── ocr_engine.py                # OCR engine for image screenshot analysis
+│   ├── fact_checker.py              # ClaimReview search & live multi-source news feed
+│   ├── classifier.py                # 3-tier probabilistic decision synthesizer
+│   ├── pdf_report.py                # Professional PDF dossier generator (fpdf2)
+│   ├── database.py                  # SQLite logging and telemetry analytics
+│   └── ui_theme.py                  # Slate & Indigo UI theme styling
+├── app.py                           # Multi-page Streamlit application entry point
+├── train_model.py                   # Rigorous multi-algorithm training & benchmarking script
+├── verify_generalization.py         # Multi-topic and domain shift verification tests
+├── requirements.txt                 # Project dependencies
+├── .env.example                     # Environment template for optional API keys
+└── README.md                        # Capstone project documentation
+```
 
 ---
 
-## 🌐 Production Deployment Guide
+## 🛠️ Installation & Local Setup
 
-You can deploy this capstone project to the cloud for free using the following channels:
+### 1. Clone the repository
+```bash
+git clone https://github.com/Kashish995/FAKE-NEWS-DETECTOR.git
+cd FAKE-NEWS-DETECTOR
+```
 
-### 1. Streamlit Community Cloud (Recommended)
-1.  Push your code to a public GitHub repository.
-2.  Go to [share.streamlit.io](https://share.streamlit.io/) and log in with GitHub.
-3.  Click **New app**, select your repository, branch (`main`), and path to the entry file (`app.py`).
-4.  Expand **Advanced Settings**. Under **Secrets**, paste your NewsAPI Key:
-    ```toml
-    NEWSAPI_KEY = "your_actual_news_api_key_here"
-    ```
-5.  Click **Deploy**. Streamlit will set up the python environment and run the Cyberpunk terminal.
+### 2. Set up virtual environment
+```bash
+python -m venv .venv
+# On Windows PowerShell:
+.\.venv\Scripts\Activate.ps1
+# On Linux / macOS:
+source .venv/bin/activate
+```
 
-### 2. Hugging Face Spaces (Gradio/Streamlit)
-1.  Go to [huggingface.co/spaces](https://huggingface.co/spaces) and click **Create new Space**.
-2.  Set the SDK to **Streamlit** and choose the license.
-3.  Create the space, clone the repo locally (or upload files directly in the browser).
-4.  Navigate to your Space's **Settings** tab. Scroll down to **Variables and Secrets** -> **New Secret**.
-    *   **Name**: `NEWSAPI_KEY`
-    *   **Value**: `your_actual_news_api_key_here`
-5.  Upload the trained model files (`model/model.pkl`, `model/vectorizer.pkl`, `model/calibration.pkl`) directly via git-lfs or the web upload button.
+### 3. Install dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 4. (Optional) Retrain and benchmark models
+```bash
+python train_model.py
+```
+
+### 5. Run TruthLens
+```bash
+python -m streamlit run app.py
+```
+Open your browser at `http://localhost:8501`.
+
+---
+
+## 🌐 Streamlit Community Cloud Deployment
+
+1. Push your repository to GitHub.
+2. Log in to [share.streamlit.io](https://share.streamlit.io/).
+3. Select your repository, branch (`main`), and set the main file path to `app.py`.
+4. (Optional) Under **Advanced Settings > Secrets**, configure any desired API keys:
+   ```toml
+   NEWSAPI_KEY = "your_key"
+   FACTCHECK_API_KEY = "your_google_key"
+   OCR_API_KEY = "helloworld"
+   ```
+5. Click **Deploy**. TruthLens will install dependencies from `requirements.txt` and launch automatically.
+
+---
+
+## ⚖️ Academic & Methodological Disclaimer
+
+TruthLens uses statistical natural language processing and probability-calibrated machine learning models trained on benchmark journalistic corpuses. Predictions evaluate stylistic, structural, and lexical conventions. **They do not constitute an infallible claim to objective real-world truth.** Multi-source journalistic corroboration, institutional fact-checking, and critical human discernment remain indispensable.
+
+---
+**TruthLens System** • *B.Tech Final-Year Capstone Major Project in Computer Science & Artificial Intelligence*.
