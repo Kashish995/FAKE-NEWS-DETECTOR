@@ -12,7 +12,10 @@ from sklearn.naive_bayes import MultinomialNB
 from sklearn.svm import LinearSVC
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.calibration import CalibratedClassifierCV, calibration_curve
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score,
+    confusion_matrix, brier_score_loss, log_loss
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 DATASET_DIR = BASE_DIR / "dataset"
@@ -81,7 +84,15 @@ X = data["combined"]
 y = data["label"]
 
 # ---------------------------------------------------------------
-# STEP 4: TF-IDF Vectorization with Enhanced Stop-Words
+# STEP 4: Stratified Train/Test Split (Split FIRST to prevent data leakage)
+# ---------------------------------------------------------------
+print("Splitting dataset into 80% train and 20% test (stratified, split BEFORE vectorizer)...")
+X_train_raw, X_test_raw, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+# ---------------------------------------------------------------
+# STEP 5: TF-IDF Vectorization (Fitted strictly on training data only)
 # ---------------------------------------------------------------
 # Remove metadata words that cause false-positive bias on modern web pages
 custom_stop_words = [
@@ -93,7 +104,7 @@ custom_stop_words = [
 ]
 all_stop_words = list(ENGLISH_STOP_WORDS) + custom_stop_words
 
-print("Fitting TF-IDF Vectorizer (8,000 max features, unigrams and bigrams)...")
+print("Fitting TF-IDF Vectorizer strictly on X_train (8,000 max features, unigrams and bigrams)...")
 vectorizer = TfidfVectorizer(
     stop_words=all_stop_words,
     ngram_range=(1, 2),
@@ -101,15 +112,8 @@ vectorizer = TfidfVectorizer(
     min_df=5,
     max_features=8000
 )
-X_vectorized = vectorizer.fit_transform(X)
-
-# ---------------------------------------------------------------
-# STEP 5: Stratified Train/Test Split
-# ---------------------------------------------------------------
-print("Splitting dataset into 80% train and 20% test (stratified)...")
-X_train, X_test, y_train, y_test = train_test_split(
-    X_vectorized, y, test_size=0.2, random_state=42, stratify=y
-)
+X_train = vectorizer.fit_transform(X_train_raw)
+X_test = vectorizer.transform(X_test_raw)
 
 # ---------------------------------------------------------------
 # STEP 6: Multi-Algorithm Benchmarking
@@ -159,19 +163,30 @@ print("=" * 65)
 
 if "SVM" in best_name:
     print("Calibrating SVM with Platt Sigmoid Scaling (CalibratedClassifierCV) for true probabilities...")
-    final_model = CalibratedClassifierCV(LinearSVC(C=0.5, random_state=42), cv=3)
+    final_model = CalibratedClassifierCV(LinearSVC(C=0.5, random_state=42), method='sigmoid', cv=3)
     final_model.fit(X_train, y_train)
 else:
     final_model = results[best_name]["model"]
+
+# Verify class ordering strictly: classes_[0] == 0 (Fake), classes_[1] == 1 (Real)
+assert list(final_model.classes_) == [0, 1], f"Unexpected classes order: {final_model.classes_}"
 
 test_preds = final_model.predict(X_test)
 cm = confusion_matrix(y_test, test_preds)
 print("\nFinal Test Confusion Matrix [Rows: Actual (0=Fake, 1=Real), Cols: Predicted]:")
 print(cm)
 
-# Calibration curve points
+# Calibration metrics & curve points on held-out test data
+brier_score = None
+eval_log_loss = None
 if hasattr(final_model, "predict_proba"):
     probs = final_model.predict_proba(X_test)[:, 1]
+    brier_score = float(brier_score_loss(y_test, probs))
+    eval_log_loss = float(log_loss(y_test, probs))
+    print(f"\nProbability Calibration Metrics on Held-out Test Split:")
+    print(f"  Brier Score: {brier_score:.4f} (lower is better)")
+    print(f"  Log Loss   : {eval_log_loss:.4f} (lower is better)")
+    
     fraction_of_positives, mean_predicted_value = calibration_curve(y_test, probs, n_bins=10)
     with open(MODEL_DIR / "calibration.pkl", "wb") as f:
         pickle.dump((fraction_of_positives, mean_predicted_value), f)
@@ -195,7 +210,9 @@ metrics_summary = {
         "accuracy": round(results[best_name]["accuracy"] * 100, 2),
         "precision": round(results[best_name]["precision"] * 100, 2),
         "recall": round(results[best_name]["recall"] * 100, 2),
-        "f1_score": round(results[best_name]["f1"] * 100, 2)
+        "f1_score": round(results[best_name]["f1"] * 100, 2),
+        "brier_score": round(brier_score, 4) if brier_score is not None else None,
+        "log_loss": round(eval_log_loss, 4) if eval_log_loss is not None else None
     },
     "confusion_matrix": cm.tolist(),
     "comparison": [

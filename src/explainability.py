@@ -128,3 +128,6 @@ def get_highlighted_tokens_html(text: str, model, vectorizer) -> str:
         return "".join(highlighted)
     except Exception:
         return text
+
+# Alias for backward compatibility
+get_highlighted_tokens = get_highlighted_tokens_html

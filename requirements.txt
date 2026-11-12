@@ -7,3 +7,6 @@ wordcloud>=1.9.0
 requests>=2.31.0
 beautifulsoup4>=4.12.0
 fpdf2>=2.7.0
+trafilatura>=2.0.0
+pytest>=8.0.0
+pillow>=10.0.0

@@ -187,3 +187,24 @@ def clear_logs(target_user: Optional[str] = None) -> bool:
     except Exception as e:
         print(f"Error clearing logs: {e}")
         return False
+
+def get_prediction_by_id(log_id: int) -> Optional[Dict[str, Any]]:
+    """Retrieves a single prediction record by ID for session restoration."""
+    try:
+        conn = get_connection()
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("""
+            SELECT id, timestamp, news_text, prediction, confidence, input_mode,
+                   clickbait_score, credibility_score, username, language, feedback
+            FROM predictions
+            WHERE id = ?
+        """, (log_id,))
+        row = c.fetchone()
+        conn.close()
+        if row:
+            return dict(row)
+        return None
+    except Exception as e:
+        print(f"Error fetching record {log_id}: {e}")
+        return None

@@ -76,31 +76,35 @@ def analyze_clickbait(text: str) -> Tuple[float, List[str]]:
     
     return min(float(score), 100.0), matched_triggers
 
-def evaluate_source_credibility(domain_or_text: str) -> Tuple[int, str, str]:
+def evaluate_source_credibility(domain: str) -> Tuple[int, str, str]:
     """
-    Evaluates source credibility based on domain or publisher mentions.
+    Evaluates source credibility strictly based on verified domain/hostname.
+    Publisher names mentioned inside body text do not grant domain credibility.
+    
     Returns: (score [0-100], source_name, classification)
     """
-    cleaned = domain_or_text.lower().strip()
+    if not domain or not isinstance(domain, str):
+        return 70, "Unspecified / Independent Source", "Standard Unverified Source"
+        
+    cleaned = domain.lower().strip()
+    
+    # If cleaned text has spaces or exceeds 80 characters, it is article text, not a domain
+    if " " in cleaned or len(cleaned) > 80 or "." not in cleaned:
+        return 70, "Independent / Unlisted Source", "Standard Unverified Source"
+        
+    # Strip URL protocol or path if user passed a raw URL
+    if "://" in cleaned:
+        from urllib.parse import urlparse
+        cleaned = urlparse(cleaned).netloc
+    cleaned = cleaned.replace("www.", "").split("/")[0].split(":")[0]
     
     # Direct domain matching
     for d, (name, score) in TRUSTED_MEDIA_DOMAINS.items():
-        if d in cleaned:
+        if cleaned == d or cleaned.endswith("." + d):
             return score, name, "Verified Reputable Publisher"
             
     for d, (name, score) in DUBIOUS_MEDIA_DOMAINS.items():
-        if d in cleaned:
+        if cleaned == d or cleaned.endswith("." + d):
             return score, name, "Known Questionable / High-Risk Domain"
             
-    # Text mention matching
-    for d, (name, score) in TRUSTED_MEDIA_DOMAINS.items():
-        keyword = name.lower()
-        if re.search(r'\b' + re.escape(keyword) + r'\b', cleaned):
-            return score, name, "Verified Publisher Mention"
-            
-    for d, (name, score) in DUBIOUS_MEDIA_DOMAINS.items():
-        keyword = name.lower()
-        if re.search(r'\b' + re.escape(keyword) + r'\b', cleaned):
-            return score, name, "Dubious Source Mention"
-            
-    return 70, "Independent / Unlisted Source", "Standard Unverified Domain"
+    return 70, f"Domain: {cleaned}", "Standard Unverified Domain"
