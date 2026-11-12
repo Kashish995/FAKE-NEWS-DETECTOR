@@ -1,0 +1,50 @@
+{
+    "best_model": "Linear SVM",
+    "evaluated_test_samples": 7821,
+    "best_metrics": {
+        "accuracy": 98.2,
+        "precision": 98.01,
+        "recall": 98.68,
+        "f1_score": 98.34
+    },
+    "confusion_matrix": [
+        [
+            3506,
+            76
+        ],
+        [
+            65,
+            4174
+        ]
+    ],
+    "comparison": [
+        {
+            "classifier": "Multinomial Naive Bayes",
+            "accuracy": 93.19,
+            "precision": 94.63,
+            "recall": 92.69,
+            "f1_score": 93.65
+        },
+        {
+            "classifier": "Logistic Regression",
+            "accuracy": 97.47,
+            "precision": 97.15,
+            "recall": 98.21,
+            "f1_score": 97.68
+        },
+        {
+            "classifier": "Linear SVM",
+            "accuracy": 98.2,
+            "precision": 98.01,
+            "recall": 98.68,
+            "f1_score": 98.34
+        },
+        {
+            "classifier": "Random Forest",
+            "accuracy": 93.94,
+            "precision": 92.41,
+            "recall": 96.77,
+            "f1_score": 94.54
+        }
+    ]
+}
