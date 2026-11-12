@@ -22,3 +22,5 @@ __pycache__/
 
 # Data
 dataset/
+
+news_logs.db

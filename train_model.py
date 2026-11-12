@@ -2,15 +2,21 @@ import re
 import json
 import pickle
 import numpy as np
+<<<<<<< HEAD
+=======
 import pandas as pd
 from pathlib import Path
 
+>>>>>>> c835feb6e1726276462368d63e3f97617350ab1b
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer, ENGLISH_STOP_WORDS
 from sklearn.linear_model import LogisticRegression
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.svm import LinearSVC
+<<<<<<< HEAD
+=======
 from sklearn.ensemble import RandomForestClassifier
+>>>>>>> c835feb6e1726276462368d63e3f97617350ab1b
 from sklearn.calibration import CalibratedClassifierCV, calibration_curve
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
@@ -161,12 +167,20 @@ print("\n" + "=" * 65)
 print(f"BEST PERFORMING ALGORITHM: {best_name} (F1: {results[best_name]['f1']*100:.2f}%)")
 print("=" * 65)
 
+<<<<<<< HEAD
+# Wrap SVM with probability calibration if it's the best model
+if best_name == "SVM (LinearSVC)":
+    print("\nWrapping SVM with probability calibration for probability outputs...")
+    best_model = CalibratedClassifierCV(LinearSVC(random_state=42), cv=3)
+    best_model.fit(X_train, y_train)
+=======
 if "SVM" in best_name:
     print("Calibrating SVM with Platt Sigmoid Scaling (CalibratedClassifierCV) for true probabilities...")
     final_model = CalibratedClassifierCV(LinearSVC(C=0.5, random_state=42), method='sigmoid', cv=3)
     final_model.fit(X_train, y_train)
 else:
     final_model = results[best_name]["model"]
+>>>>>>> c835feb6e1726276462368d63e3f97617350ab1b
 
 # Verify class ordering strictly: classes_[0] == 0 (Fake), classes_[1] == 1 (Real)
 assert list(final_model.classes_) == [0, 1], f"Unexpected classes order: {final_model.classes_}"
@@ -193,11 +207,42 @@ if hasattr(final_model, "predict_proba"):
 
 # ---------------------------------------------------------------
 # STEP 8: Save Model Assets and Actual Empirical Metrics
+>>>>>>> c835feb6e1726276462368d63e3f97617350ab1b
 # ---------------------------------------------------------------
 print("\nSaving trained models, vectorizer, and test metrics...")
 with open(MODEL_DIR / "model.pkl", "wb") as f:
     pickle.dump(final_model, f)
 
+<<<<<<< HEAD
+metrics_artifact = {
+    "models": {
+        name: {
+            "accuracy": round(r["accuracy"] * 100, 2),
+            "precision": round(r["precision"] * 100, 2),
+            "recall": round(r["recall"] * 100, 2),
+            "f1": round(r["f1"] * 100, 2),
+        }
+        for name, r in results.items()
+    },
+    "best_model_name": best_name,
+    "confusion_matrix": cm.tolist(),
+}
+pickle.dump(metrics_artifact, open("model/metrics.pkl", "wb"))
+
+with open("model/metrics.txt", "w") as f:
+    f.write(f"Model used: {best_name}\n")
+    f.write(f"Accuracy: {results[best_name]['accuracy']*100:.2f}%\n")
+    f.write(f"Precision: {results[best_name]['precision']*100:.2f}%\n")
+    f.write(f"Recall: {results[best_name]['recall']*100:.2f}%\n")
+    f.write(f"F1 Score: {results[best_name]['f1']*100:.2f}%\n")
+    f.write(f"Confusion Matrix [0=Fake,1=Real]:\n{cm}\n")
+    f.write(f"\nAll models compared:\n")
+    for name, r in results.items():
+        f.write(f"  {name}: acc={r['accuracy']*100:.2f}% prec={r['precision']*100:.2f}% "
+                f"rec={r['recall']*100:.2f}% f1={r['f1']*100:.2f}%\n")
+
+print("\nModel trained and saved successfully without TF-IDF data leakage! (artifacts updated in model/)")
+=======
 with open(MODEL_DIR / "vectorizer.pkl", "wb") as f:
     pickle.dump(vectorizer, f)
 
@@ -242,3 +287,4 @@ with open(MODEL_DIR / "metrics.txt", "w") as f:
         f.write(f"  - {row['classifier']}: Acc={row['accuracy']}% Prec={row['precision']}% Rec={row['recall']}% F1={row['f1_score']}%\n")
 
 print("\nTraining and Evaluation complete! Artifacts saved to model/ directory.")
+>>>>>>> c835feb6e1726276462368d63e3f97617350ab1b
