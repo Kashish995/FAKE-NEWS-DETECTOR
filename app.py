@@ -139,44 +139,9 @@ with st.sidebar:
     st.markdown("---")
     st.caption("Verification Engine: **Calibrated SVM (v2.2)**")
 
-# Restore previous analysis from database if ID is in query params and matches current page
-query_analysis_id = st.query_params.get("id")
-if query_analysis_id:
-    try:
-        rec_id = int(query_analysis_id)
-        # Check if already loaded in any slot
-        already_loaded = any(
-            slot and slot.get("log_id") == rec_id
-            for slot in (st.session_state.text_active_analysis, st.session_state.url_active_analysis, st.session_state.image_active_analysis)
-        )
-        if not already_loaded:
-            loaded_record = get_prediction_by_id(rec_id)
-            if loaded_record:
-                raw_text = loaded_record["news_text"]
-                clean_eval_text = raw_text
-                eval_domain = ""
-                if raw_text.startswith("[") and "]" in raw_text:
-                    parts = raw_text.split("]", 1)
-                    eval_domain = parts[0].replace("[", "").strip()
-                    clean_eval_text = parts[1].strip()
-                    
-                fc_res = query_fact_checking_pipeline(clean_eval_text[:120], clean_eval_text)
-                reconstructed = {
-                    "res": analyze_four_components(clean_eval_text, eval_domain, fc_res),
-                    "text": clean_eval_text,
-                    "input_mode": loaded_record.get("input_mode", "Text"),
-                    "domain": eval_domain,
-                    "log_id": loaded_record["id"]
-                }
-                mode = loaded_record.get("input_mode", "Text")
-                if mode == "Text":
-                    st.session_state.text_active_analysis = reconstructed
-                elif mode == "URL":
-                    st.session_state.url_active_analysis = reconstructed
-                elif mode == "Image OCR":
-                    st.session_state.image_active_analysis = reconstructed
-    except Exception:
-        pass
+# If leftover ID exists in query params, remove it to keep browser URL clean
+if "id" in st.query_params:
+    del st.query_params["id"]
 
 # =========================================================================
 # COMPONENT RENDERER: FOUR INDEPENDENT ANALYSIS COMPONENTS
@@ -435,6 +400,19 @@ elif selected_page == "🔍 Analyse News":
     words = len(input_text.split())
     st.caption(f"Word Count: **{words}** words")
     
+    # Automatically clear stale prediction results if input text is empty or modified
+    if not input_text.strip():
+        st.session_state.text_active_analysis = None
+        if "id" in st.query_params:
+            del st.query_params["id"]
+    elif (
+        st.session_state.text_active_analysis
+        and st.session_state.text_active_analysis.get("text", "").strip() != input_text.strip()
+    ):
+        st.session_state.text_active_analysis = None
+        if "id" in st.query_params:
+            del st.query_params["id"]
+    
     if st.button("RUN TRUTHLENS DIAGNOSTICS", type="primary", key="btn_run_text"):
         if not input_text.strip():
             st.warning("Please enter claim text to analyze.")
@@ -463,13 +441,18 @@ elif selected_page == "🔍 Analyse News":
                 )
                 st.session_state.text_active_analysis = {
                     "res": res,
-                    "text": input_text,
+                    "text": input_text.strip(),
                     "input_mode": "Text",
                     "log_id": log_id
                 }
-                st.query_params["id"] = str(log_id)
+                if "id" in st.query_params:
+                    del st.query_params["id"]
                 
-    if st.session_state.text_active_analysis:
+    if (
+        st.session_state.text_active_analysis
+        and input_text.strip()
+        and st.session_state.text_active_analysis.get("text", "").strip() == input_text.strip()
+    ):
         render_four_independent_components(
             st.session_state.text_active_analysis,
             st.session_state.text_active_analysis["text"],
@@ -490,6 +473,19 @@ elif selected_page == "🌐 URL Verification":
         placeholder="e.g. https://www.thehindu.com/news/national/.../article.ece",
         key="url_input_box"
     )
+    
+    # Automatically clear stale prediction results if URL input is empty or modified
+    if not url_input.strip():
+        st.session_state.url_active_analysis = None
+        if "id" in st.query_params:
+            del st.query_params["id"]
+    elif (
+        st.session_state.url_active_analysis
+        and st.session_state.url_active_analysis.get("input_url", "").strip() != url_input.strip()
+    ):
+        st.session_state.url_active_analysis = None
+        if "id" in st.query_params:
+            del st.query_params["id"]
     
     if st.button("FETCH & ANALYSE ARTICLE", type="primary", key="btn_run_url"):
         if not url_input.strip():
@@ -538,12 +534,18 @@ elif selected_page == "🌐 URL Verification":
                         "res": res,
                         "text": extracted_text,
                         "input_mode": "URL",
+                        "input_url": url_input.strip(),
                         "domain": scraped["domain"],
                         "log_id": log_id
                     }
-                    st.query_params["id"] = str(log_id)
+                    if "id" in st.query_params:
+                        del st.query_params["id"]
                     
-    if st.session_state.url_active_analysis:
+    if (
+        st.session_state.url_active_analysis
+        and url_input.strip()
+        and st.session_state.url_active_analysis.get("input_url", "").strip() == url_input.strip()
+    ):
         render_four_independent_components(
             st.session_state.url_active_analysis,
             st.session_state.url_active_analysis["text"],
@@ -668,7 +670,8 @@ elif selected_page == "📷 Image Analysis":
                             "image_hash": current_hash,
                             "log_id": log_id
                         }
-                        st.query_params["id"] = str(log_id)
+                        if "id" in st.query_params:
+                            del st.query_params["id"]
                         
     # Only render results if an analysis is active AND belongs to the currently uploaded image
     if (
