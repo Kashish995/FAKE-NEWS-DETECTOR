@@ -249,3 +249,32 @@ def test_query_fact_checking_pipeline_offline():
         assert res["has_debunk"] is False
         assert res["has_relevant_news"] is False
         assert res["external_status"] == "No sufficiently relevant matching articles found."
+
+def test_rss_news_link_extraction_integrity():
+    from src.fact_checker import search_live_news_corroboration
+    mock_rss = b"""<?xml version="1.0" encoding="UTF-8"?>
+    <rss version="2.0">
+    <channel>
+        <item>
+            <title>Delhi air quality likely to turn Very Poor today - The Indian Express</title>
+            <link>https://news.google.com/rss/articles/CBMiTEST12345</link>
+            <pubDate>Mon, 16 Nov 2026 14:33:52 GMT</pubDate>
+            <source url="https://indianexpress.com">The Indian Express</source>
+        </item>
+    </channel>
+    </rss>"""
+    
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.content = mock_rss
+    mock_resp.text = mock_rss.decode("utf-8")
+    
+    with patch("requests.get", return_value=mock_resp):
+        results = search_live_news_corroboration("Delhi air quality likely to turn Very Poor today")
+        assert len(results) >= 1
+        item = results[0]
+        assert item["url"].startswith("http")
+        assert item["url"] != "#"
+        assert item["source_url"] == "https://indianexpress.com"
+        assert item["publisher"] == "The Indian Express"
+

@@ -157,7 +157,11 @@ def search_live_news_corroboration(
         if response.status_code != 200:
             return []
             
-        soup = BeautifulSoup(response.text, 'html.parser')
+        try:
+            soup = BeautifulSoup(response.content, 'xml')
+        except Exception:
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
         items = soup.find_all('item')[:12]
         
         # Determine publisher keywords to exclude from self-corroboration
@@ -173,13 +177,33 @@ def search_live_news_corroboration(
         for item in items:
             title_tag = item.find('title')
             link_tag = item.find('link')
-            pub_date_tag = item.find('pubdate')
+            pub_date_tag = item.find('pubdate') or item.find('pubDate')
             source_tag = item.find('source')
             
             title_text = title_tag.text.strip() if title_tag else ""
-            link_url = link_tag.text.strip() if link_tag else ""
+            
+            # Robust URL extraction: handle XML, html.parser void tag, and raw item string
+            link_url = ""
+            if link_tag and link_tag.text.strip():
+                link_url = link_tag.text.strip()
+            elif link_tag and link_tag.next_sibling and isinstance(link_tag.next_sibling, str) and link_tag.next_sibling.strip():
+                link_url = link_tag.next_sibling.strip()
+            else:
+                raw_item = str(item)
+                match = re.search(r'<link[^>]*>([^<]+)', raw_item) or re.search(r'<link[^>]*/>\s*([^\s<]+)', raw_item)
+                if match:
+                    link_url = match.group(1).strip()
+            
+            source_url = source_tag.get('url', '').strip() if source_tag else ""
             pub_date = pub_date_tag.text.strip() if pub_date_tag else "Recent"
             publisher = source_tag.text.strip() if source_tag else "News Media"
+            
+            # Fallback to source URL or web search if link_url is missing
+            if not link_url or not link_url.startswith("http"):
+                if source_url and source_url.startswith("http"):
+                    link_url = source_url
+                elif title_text:
+                    link_url = f"https://www.google.com/search?q={urllib.parse.quote(title_text)}"
             
             # If publisher was in title suffix (e.g. 'Article Title - The Hindu')
             if ' - ' in title_text and (not publisher or publisher == "News Media"):
@@ -210,6 +234,7 @@ def search_live_news_corroboration(
                 "title": title_text,
                 "publisher": publisher,
                 "url": link_url,
+                "source_url": source_url,
                 "date": pub_date,
                 "relevance_score": int(relevance * 100),
                 "evidence_type": "Supporting Coverage"

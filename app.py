@@ -294,13 +294,17 @@ def render_four_independent_components(analysis_data: dict, source_text: str, in
             st.markdown(f"##### ⚠️ Verified Fact-Check Records ({len(fcs)} found)")
             for fc in fcs[:3]:
                 st.markdown(f"• **[{fc.get('fact_checker', 'Fact Checker')}]**: *{fc.get('rating', 'Evaluated')}* - {fc.get('claim', '')}")
-                if fc.get("review_url"):
-                    st.markdown(f"  [Read Full Investigation]({fc['review_url']})")
+                review_target = fc.get("review_url") or f"https://www.google.com/search?q={urllib.parse.quote(fc.get('claim', ''))}"
+                st.markdown(f"  [🔗 Read Full Investigation]({review_target})")
                     
         if rel_news:
             st.markdown(f"##### 📰 Independent Corroborating News Coverage ({len(rel_news)} sources)")
             for art in rel_news:
-                st.markdown(f"• **[{art.get('publisher', 'News')}]** [{art.get('title', 'Article')}]({art.get('url', '#')}) (Relevance: {art.get('relevance_score', 0)}%)")
+                target_url = art.get("url") if (art.get("url") and art["url"] != "#") else (art.get("source_url") or f"https://www.google.com/search?q={urllib.parse.quote(art.get('title', ''))}")
+                pub_name = art.get('publisher', 'News Media')
+                pub_url = art.get('source_url')
+                pub_str = f"[{pub_name}]({pub_url})" if pub_url else pub_name
+                st.markdown(f"• **[{pub_str}]** [{art.get('title', 'Article')}]({target_url}) (Relevance: {art.get('relevance_score', 0)}%)")
         else:
             st.markdown("##### 📰 Independent Corroborating News Coverage")
             st.info("No sufficiently relevant corroboration was found in active news archives.")
@@ -725,7 +729,11 @@ elif selected_page == "✅ Fact Checking":
             if news:
                 st.markdown(f"#### 📰 Genuinely Relevant Multi-Source News ({len(news)})")
                 for art in news:
-                    st.markdown(f"• **[{art.get('publisher', 'News')}]** [{art.get('title', 'Headline')}]({art.get('url', '#')}) ({art.get('date', 'Recent')}) — *Relevance: {art.get('relevance_score')}%*")
+                    target_url = art.get("url") if (art.get("url") and art["url"] != "#") else (art.get("source_url") or f"https://www.google.com/search?q={urllib.parse.quote(art.get('title', ''))}")
+                    pub_name = art.get('publisher', 'News Media')
+                    pub_url = art.get('source_url')
+                    pub_str = f"[{pub_name}]({pub_url})" if pub_url else pub_name
+                    st.markdown(f"• **[{pub_str}]** [{art.get('title', 'Headline')}]({target_url}) ({art.get('date', 'Recent')}) — *Relevance: {art.get('relevance_score')}%*")
             else:
                 st.info("No sufficiently relevant matching articles found.")
 
