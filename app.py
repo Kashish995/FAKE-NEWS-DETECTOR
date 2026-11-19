@@ -1,5 +1,6 @@
 import os
 import json
+import urllib.parse
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -396,11 +397,11 @@ if selected_page == "🏠 Home":
     st.markdown("""
     ```mermaid
     graph LR
-        In[Input Article] --> A[A. Machine Learning Classification]
-        In --> B[B. Source Credibility Assessment]
-        In --> C[C. External News Verification]
-        A & B & C --> D[D. Final Evidence Assessment]
-        D --> Out[Likely Reliable | Likely Misleading | Needs Further Verification]
+        In["Input Article"] --> A["A. Machine Learning Classification"]
+        In --> B["B. Source Credibility Assessment"]
+        In --> C["C. External News Verification"]
+        A & B & C --> D["D. Final Evidence Assessment"]
+        D --> Out["Likely Reliable / Likely Misleading / Needs Verification"]
     ```
     """)
     
