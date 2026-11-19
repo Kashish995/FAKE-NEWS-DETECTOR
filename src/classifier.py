@@ -27,6 +27,42 @@ def load_ml_assets():
             _VECTORIZER = pickle.load(f)
     return _MODEL, _VECTORIZER
 
+def get_class_probabilities(model, vec_text) -> Tuple[float, float]:
+    """
+    Safely retrieves probability of Fake and Real using model.classes_
+    to prevent class index inversion bugs.
+    
+    Returns:
+        Tuple[p_fake, p_real]
+    """
+    if hasattr(model, "predict_proba"):
+        probs = model.predict_proba(vec_text)[0]
+    elif hasattr(model, "decision_function"):
+        decision = model.decision_function(vec_text)[0]
+        prob_real = 1.0 / (1.0 + np.exp(-decision))
+        probs = np.array([1.0 - prob_real, prob_real])
+    else:
+        probs = np.array([0.5, 0.5])
+
+    classes = list(getattr(model, "classes_", [0, 1]))
+    
+    # Label 0 represents Fake, Label 1 represents Real
+    fake_idx = classes.index(0) if 0 in classes else (classes.index("Fake") if "Fake" in classes else 0)
+    real_idx = classes.index(1) if 1 in classes else (classes.index("Real") if "Real" in classes else 1)
+    
+    p_fake = float(probs[fake_idx])
+    p_real = float(probs[real_idx])
+    
+    # Normalize to ensure exact mathematical consistency
+    total = p_fake + p_real
+    if total > 0:
+        p_fake /= total
+        p_real /= total
+    else:
+        p_fake, p_real = 0.5, 0.5
+        
+    return p_fake, p_real
+
 def analyze_four_components(
     text: str,
     domain_or_url: str = "",
@@ -37,7 +73,7 @@ def analyze_four_components(
     A. MACHINE LEARNING CLASSIFICATION (Unbiased, never altered)
     B. SOURCE CREDIBILITY (Independent domain authority)
     C. EXTERNAL NEWS VERIFICATION (Strictly relevant ClaimReviews & news)
-    D. FINAL EVIDENCE ASSESSMENT (3-tier synthesis with explicit conflict detection)
+    D. FINAL EVIDENCE ASSESSMENT (3-tier synthesis with honest uncertainty)
     """
     model, vectorizer = load_ml_assets()
     
@@ -48,43 +84,52 @@ def analyze_four_components(
     
     # -------------------------------------------------------------
     # COMPONENT A: MACHINE LEARNING CLASSIFICATION
-    # (Evaluates purely linguistic and stylistic patterns. Never altered)
+    # (Evaluates linguistic/stylistic patterns. Probabilities are NEVER altered)
     # -------------------------------------------------------------
     vec = vectorizer.transform([cleaned_text])
-    if hasattr(model, "predict_proba"):
-        probs = model.predict_proba(vec)[0]  # [P(Fake), P(Real)]
-    else:
-        decision = model.decision_function(vec)[0]
-        prob_real = 1.0 / (1.0 + np.exp(-decision))
-        probs = np.array([1.0 - prob_real, prob_real])
-        
-    p_fake = float(probs[0])
-    p_real = float(probs[1])
+    p_fake, p_real = get_class_probabilities(model, vec)
     
     # Raw ML stylistic decision
     if word_count < MIN_WORDS_FOR_RELIABLE_ML:
         ml_prediction = "Insufficient Text Length"
-        ml_confidence = round(max(p_fake, p_real), 3)
-        ml_summary = f"Content is too brief ({word_count} words). Stylistic NLP models require at least {MIN_WORDS_FOR_RELIABLE_ML} words to evaluate structural patterns reliably."
+        ml_confidence = round(max(p_fake, p_real), 4)
+        ml_summary = (
+            f"Content is too brief ({word_count} words). Stylistic NLP models require at least "
+            f"{MIN_WORDS_FOR_RELIABLE_ML} words to evaluate structural patterns reliably."
+        )
     elif not lang_info["supported_for_ml"]:
-        ml_prediction = f"Unsupported Language ({lang_info['language']})"
+        ml_prediction = f"Unsupported Script ({lang_info['language']})"
         ml_confidence = 0.50
         ml_summary = lang_info["notice"]
-    elif p_real >= 0.50:
+    elif p_real >= CONFIDENCE_HIGH_THRESHOLD:
         ml_prediction = "Likely Reliable Style"
-        ml_confidence = round(p_real, 3)
-        ml_summary = f"Linguistic vectors reflect standard formal journalistic syntax, neutral attribution patterns, and factual wire conventions (Model Probability: {p_real*100:.1f}%)."
-    else:
+        ml_confidence = round(p_real, 4)
+        ml_summary = (
+            f"Linguistic vectors reflect standard formal journalistic syntax, neutral attribution "
+            f"patterns, and factual wire conventions (P(Real): {p_real*100:.1f}%)."
+        )
+    elif p_fake >= CONFIDENCE_HIGH_THRESHOLD:
         ml_prediction = "Likely Misleading Style"
-        ml_confidence = round(p_fake, 3)
-        ml_summary = f"Linguistic vectors reflect structural patterns typical of sensationalist or non-standard articles (Model Probability: {p_fake*100:.1f}%)."
+        ml_confidence = round(p_fake, 4)
+        ml_summary = (
+            f"Linguistic vectors reflect structural patterns typical of sensationalist or non-standard "
+            f"fabricated articles (P(Fake): {p_fake*100:.1f}%)."
+        )
+    else:
+        # Ambiguous / closely balanced probabilities (e.g. 46.5% vs 53.5%)
+        ml_prediction = "Uncertain / Neutral Style"
+        ml_confidence = round(max(p_fake, p_real), 4)
+        ml_summary = (
+            f"Stylistic probabilities are closely balanced (Fake: {p_fake*100:.1f}%, Real: {p_real*100:.1f}%). "
+            f"Linguistic structure exhibits neither strong wire-journalism nor clear clickbait markers."
+        )
         
     shap_features = explain_shap_linear(cleaned_text, model, vectorizer, top_k=10)
     
     component_a_ml = {
         "prediction_label": ml_prediction,
         "raw_prediction": "Real" if p_real >= 0.50 else "Fake",
-        "confidence": ml_confidence,
+        "confidence": float(ml_confidence),
         "confidence_pct": round(ml_confidence * 100, 1),
         "probability_fake": round(p_fake, 4),
         "probability_real": round(p_real, 4),
@@ -110,8 +155,8 @@ def analyze_four_components(
         "clickbait_score": cb_score,
         "clickbait_triggers": cb_triggers,
         "summary": (
-            f"Source matches '{source_name}' ({cred_score}/100 credibility index). "
-            f"Sensationalism/Clickbait rating: {int(cb_score)}/100."
+            f"Source matched '{source_name}' ({cred_score}/100 credibility index). "
+            f"Sensationalism rating: {int(cb_score)}/100."
         )
     }
     
@@ -142,71 +187,88 @@ def analyze_four_components(
     }
     
     # -------------------------------------------------------------
-    # -------------------------------------------------------------
     # COMPONENT D: FINAL EVIDENCE ASSESSMENT
     # (Transparent 3-Tier Synthesis with Honest Confidence & Conflict Detection)
+    # Tiers: LIKELY RELIABLE | LIKELY MISLEADING | NEEDS FURTHER VERIFICATION
     # -------------------------------------------------------------
     has_conflict = False
     conflict_message = None
-    final_label = "UNABLE TO VERIFY"
+    final_label = "NEEDS FURTHER VERIFICATION"
     verdict = VERDICT_VERIFY
     badge_color = "#eab308"
     final_confidence = round(max(p_fake, p_real), 4)
     final_explanation = ""
     
-    # Rule 1: Verified Fact-Check Debunk present -> FAKE NEWS
+    # Check if any fact-check record is affirmatively "True"
+    has_verified_true = False
+    for fc in fc_claims:
+        rating_lower = fc.get("rating", "").lower()
+        if any(tr in rating_lower for tr in ["true", "correct", "accurate", "verified"]):
+            if not any(fl in rating_lower for fl in ["false", "misleading", "partly", "half", "fake"]):
+                has_verified_true = True
+                break
+
+    # Rule 1: Verified Fact-Check Debunk present -> LIKELY MISLEADING
     if has_debunk:
-        final_label = "FAKE NEWS"
+        final_label = "LIKELY MISLEADING"
         verdict = VERDICT_MISLEADING
         top_fc = fc_claims[0]
         final_confidence = max(p_fake, 0.85)
         badge_color = "#ef4444"
         final_explanation = (
-            f"Independent fact-check records evaluate this claim as '{top_fc.get('rating', 'False')}'. "
-            f"Archived by {top_fc.get('fact_checker', 'Independent Fact Checker')}."
+            f"Independent fact-checking records evaluate this claim as '{top_fc.get('rating', 'False')}'. "
+            f"Evaluated by {top_fc.get('fact_checker', 'Independent Fact Checker')}."
         )
         if p_real > 0.60:
             has_conflict = True
-            conflict_message = "Conflicting Evidence: Machine learning identified formal writing style, but factual archives contradict the claim."
+            conflict_message = "Conflicting Evidence: Stylistic ML identified formal writing style, but factual archives contradict the claim."
             
     # Rule 2: Multi-source external news corroboration from independent publishers
-    elif len(rel_news) >= 1 and rel_news[0].get("relevance_score", 0) >= 30:
+    elif len(rel_news) >= 1 and rel_news[0].get("relevance_score", 0) >= 35:
         top_art = rel_news[0]
-        if p_fake >= 0.70:
-            # Conflict: Model says fake style, but legitimate external news coverage confirms it
-            final_label = "UNABLE TO VERIFY"
+        if p_fake >= CONFIDENCE_HIGH_THRESHOLD:
+            # Conflict: Model detected fake style, but external coverage exists
+            final_label = "NEEDS FURTHER VERIFICATION"
             verdict = VERDICT_VERIFY
             has_conflict = True
             badge_color = "#eab308"
             conflict_message = "Conflicting Evidence: Stylistic model detected sensational markers, but external news reports cover this event."
             final_explanation = (
-                f"Conflicting Evidence: Machine learning flagged stylistic variations ({p_fake*100:.1f}% fake probability), "
+                f"Conflicting Evidence: Stylistic ML flagged non-standard markers ({p_fake*100:.1f}% fake probability), "
                 f"yet matching reports were located from {top_art['publisher']}."
             )
-        else:
-            final_label = "REAL NEWS"
+        elif p_real >= 0.50 or has_verified_true:
+            final_label = "LIKELY RELIABLE"
             verdict = VERDICT_RELIABLE
             final_confidence = round(p_real, 4)
             badge_color = "#22c55e"
             final_explanation = (
                 f"Reporting is corroborated by independent news coverage from {top_art['publisher']} "
-                f"and is consistent with factual wire standards."
+                f"(relevance: {top_art.get('relevance_score')}%) and is consistent with factual reporting standards."
+            )
+        else:
+            final_label = "NEEDS FURTHER VERIFICATION"
+            verdict = VERDICT_VERIFY
+            badge_color = "#eab308"
+            final_explanation = (
+                f"External coverage was located from {top_art['publisher']}, but stylistic analysis remains ambiguous. "
+                f"Independent verification recommended."
             )
             
     # Rule 3: High-confidence stylistic ML Real with no debunks and low clickbait
     elif p_real >= 0.75 and cb_score < 40 and word_count >= MIN_WORDS_FOR_RELIABLE_ML:
-        final_label = "REAL NEWS"
+        final_label = "LIKELY RELIABLE"
         verdict = VERDICT_RELIABLE
         final_confidence = round(p_real, 4)
         badge_color = "#22c55e"
         final_explanation = (
             f"The article reflects neutral journalistic styling, standard attribution syntax, "
-            f"and factual wire structural conventions."
+            f"and factual wire structural conventions (P(Real): {p_real*100:.1f}%)."
         )
         
     # Rule 4: High-confidence stylistic ML Fake with sensational clickbait markers
     elif (p_fake >= 0.75 or cb_score >= 65) and word_count >= MIN_WORDS_FOR_RELIABLE_ML:
-        final_label = "FAKE NEWS"
+        final_label = "LIKELY MISLEADING"
         verdict = VERDICT_MISLEADING
         final_confidence = round(max(p_fake, cb_score / 100.0), 4)
         badge_color = "#ef4444"
@@ -215,14 +277,14 @@ def analyze_four_components(
             f"or sensationalism ({p_fake*100:.1f}% stylistic fake probability)."
         )
         
-    # Rule 5: Insufficient text length, ambiguous probability, or uncorroborated claims
+    # Rule 5: Insufficient text length, ambiguous probability (e.g. 46.5% vs 53.5%), or uncorroborated claims
     else:
-        final_label = "UNABLE TO VERIFY"
+        final_label = "NEEDS FURTHER VERIFICATION"
         verdict = VERDICT_VERIFY
         badge_color = "#eab308"
         if word_count < MIN_WORDS_FOR_RELIABLE_ML:
             final_explanation = (
-                f"Input is too brief ({word_count} words) for structural NLP evaluation. "
+                f"Input length ({word_count} words) is below the reliable threshold ({MIN_WORDS_FOR_RELIABLE_ML}+ words). "
                 f"Insufficient independent evidence found to confirm or refute the claim."
             )
         else:
@@ -251,7 +313,7 @@ def analyze_four_components(
         "component_d_assessment": component_d_assessment,
         "language_info": lang_info,
         "word_count": word_count,
-        # Legacy flat keys for PDF and backward compatibility
+        # Flat keys for PDF and backward compatibility
         "final_label": final_label,
         "verdict": verdict,
         "confidence": float(final_confidence),

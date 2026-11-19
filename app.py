@@ -18,7 +18,7 @@ from src.database import (
 )
 from src.classifier import load_ml_assets, analyze_four_components
 from src.scraper import scrape_article
-from src.ocr_engine import extract_text_from_image
+from src.ocr_engine import extract_text_from_image, compute_image_hash
 from src.fact_checker import query_fact_checking_pipeline
 from src.explainability import (
     explain_shap_linear, plot_shap_bar, get_highlighted_tokens_html
@@ -64,9 +64,23 @@ if "factcheck_key" not in st.session_state:
 if "ocr_key" not in st.session_state:
     st.session_state.ocr_key = OCR_API_KEY_ENV
 
-# 3. Active analysis cache
-if "active_analysis" not in st.session_state:
-    st.session_state.active_analysis = None
+# 3. Page-isolated analysis caches
+if "text_active_analysis" not in st.session_state:
+    st.session_state.text_active_analysis = None
+if "url_active_analysis" not in st.session_state:
+    st.session_state.url_active_analysis = None
+if "image_active_analysis" not in st.session_state:
+    st.session_state.image_active_analysis = None
+
+# 4. OCR image synchronization states
+if "ocr_image_hash" not in st.session_state:
+    st.session_state.ocr_image_hash = ""
+if "ocr_extracted_text" not in st.session_state:
+    st.session_state.ocr_extracted_text = ""
+if "ocr_source" not in st.session_state:
+    st.session_state.ocr_source = None
+if "ocr_error" not in st.session_state:
+    st.session_state.ocr_error = None
 
 # Navigation options
 NAV_PAGES = [
@@ -122,31 +136,44 @@ with st.sidebar:
             st.rerun()
 
     st.markdown("---")
-    st.caption("Verification Engine: **Calibrated SVM (v2.1)**")
+    st.caption("Verification Engine: **Calibrated SVM (v2.2)**")
 
-# Restore previous analysis from database if ID is in query params
+# Restore previous analysis from database if ID is in query params and matches current page
 query_analysis_id = st.query_params.get("id")
-if query_analysis_id and st.session_state.active_analysis is None:
+if query_analysis_id:
     try:
-        loaded_record = get_prediction_by_id(int(query_analysis_id))
-        if loaded_record:
-            # Reconstruct analysis components
-            raw_text = loaded_record["news_text"]
-            # Clean URL domain tag if present
-            clean_eval_text = raw_text
-            eval_domain = ""
-            if raw_text.startswith("[") and "]" in raw_text:
-                parts = raw_text.split("]", 1)
-                eval_domain = parts[0].replace("[", "").strip()
-                clean_eval_text = parts[1].strip()
-                
-            fc_res = query_fact_checking_pipeline(clean_eval_text[:120], clean_eval_text)
-            st.session_state.active_analysis = {
-                "res": analyze_four_components(clean_eval_text, eval_domain, fc_res),
-                "text": clean_eval_text,
-                "input_mode": loaded_record.get("input_mode", "Text"),
-                "log_id": loaded_record["id"]
-            }
+        rec_id = int(query_analysis_id)
+        # Check if already loaded in any slot
+        already_loaded = any(
+            slot and slot.get("log_id") == rec_id
+            for slot in (st.session_state.text_active_analysis, st.session_state.url_active_analysis, st.session_state.image_active_analysis)
+        )
+        if not already_loaded:
+            loaded_record = get_prediction_by_id(rec_id)
+            if loaded_record:
+                raw_text = loaded_record["news_text"]
+                clean_eval_text = raw_text
+                eval_domain = ""
+                if raw_text.startswith("[") and "]" in raw_text:
+                    parts = raw_text.split("]", 1)
+                    eval_domain = parts[0].replace("[", "").strip()
+                    clean_eval_text = parts[1].strip()
+                    
+                fc_res = query_fact_checking_pipeline(clean_eval_text[:120], clean_eval_text)
+                reconstructed = {
+                    "res": analyze_four_components(clean_eval_text, eval_domain, fc_res),
+                    "text": clean_eval_text,
+                    "input_mode": loaded_record.get("input_mode", "Text"),
+                    "domain": eval_domain,
+                    "log_id": loaded_record["id"]
+                }
+                mode = loaded_record.get("input_mode", "Text")
+                if mode == "Text":
+                    st.session_state.text_active_analysis = reconstructed
+                elif mode == "URL":
+                    st.session_state.url_active_analysis = reconstructed
+                elif mode == "Image OCR":
+                    st.session_state.image_active_analysis = reconstructed
     except Exception:
         pass
 
@@ -162,25 +189,37 @@ def render_four_independent_components(analysis_data: dict, source_text: str, in
     comp_c = res["component_c_external"]
     comp_d = res["component_d_assessment"]
     
-    # 1. Final Result Label & Color
-    final_label = comp_d.get("final_label") or ("REAL NEWS" if comp_d["verdict"] == "Likely Reliable" else "FAKE NEWS" if comp_d["verdict"] == "Likely Misleading" else "UNABLE TO VERIFY")
-    badge_color = comp_d.get("badge_color", "#22c55e" if final_label == "REAL NEWS" else "#ef4444" if final_label == "FAKE NEWS" else "#eab308")
-    icon = "✅" if final_label == "REAL NEWS" else "⚠️" if final_label == "FAKE NEWS" else "🔍"
+    # 1. 3-Tier Verdict Label & Colors
+    final_label = comp_d.get("final_label", VERDICT_VERIFY)
+    if final_label == "LIKELY RELIABLE" or comp_d.get("verdict") == VERDICT_RELIABLE:
+        badge_color = "#22c55e"
+        badge_bg = "rgba(34, 197, 94, 0.08)"
+        icon = "✅"
+    elif final_label == "LIKELY MISLEADING" or comp_d.get("verdict") == VERDICT_MISLEADING:
+        badge_color = "#ef4444"
+        badge_bg = "rgba(239, 68, 68, 0.08)"
+        icon = "⚠️"
+    else:
+        final_label = "NEEDS FURTHER VERIFICATION"
+        badge_color = "#eab308"
+        badge_bg = "rgba(234, 179, 8, 0.08)"
+        icon = "🔍"
     
-    # 2. Fake Probability
+    # 2. Model Probabilities
     fake_prob_pct = comp_d.get("fake_probability_pct", round(comp_a.get("probability_fake", 0.5) * 100, 1))
+    real_prob_pct = comp_d.get("real_probability_pct", round(comp_a.get("probability_real", 0.5) * 100, 1))
     
-    # 3. Short Explanation (1-2 plain-English sentences)
-    short_explanation = comp_d.get("explanation", "Verification completed.")
+    # 3. Explanation
+    short_explanation = comp_d.get("explanation", "Verification evaluation completed.")
     
-    # 4. News Source (Publisher name)
+    # 4. News Source
     publisher_name = comp_b.get("source_name", "Independent / Unlisted Source")
     if domain_info and publisher_name.startswith("Domain:"):
         publisher_name = domain_info
         
-    # 5. Verification Note
+    # 5. External Verification Status
     if comp_c.get("has_debunk"):
-        verification_note = f"Prior debunk found in ClaimReview ({len(comp_c.get('verified_claims', []))} fact-check record(s) contradict this claim)."
+        verification_note = f"Prior debunk located in ClaimReview ({len(comp_c.get('verified_claims', []))} fact-check record(s) contradict this claim)."
     elif comp_c.get("has_relevant_news"):
         top_art = comp_c["relevant_news"][0]
         verification_note = f"Corroborated by independent coverage from {top_art['publisher']} ({top_art['relevance_score']}% relevance match)."
@@ -188,13 +227,15 @@ def render_four_independent_components(analysis_data: dict, source_text: str, in
         verification_note = "No matching independent fact-checks or news reports found."
         
     # =============================================================
-    # SIMPLIFIED RESULT CARD (SHOWN TO ORDINARY USERS)
+    # TRANSPARENT VERDICT CARD (3-TIER HONEST ASSESSMENT)
     # =============================================================
     st.markdown(f"""
-    <div style="background-color: rgba(15, 23, 42, 0.04); border: 2px solid {badge_color}; border-left: 8px solid {badge_color}; padding: 20px 24px; border-radius: 12px; margin-bottom: 20px;">
+    <div style="background-color: {badge_bg}; border: 1.5px solid {badge_color}; border-left: 8px solid {badge_color}; padding: 20px 24px; border-radius: 12px; margin-bottom: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
             <span style="font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px; color: #64748b;">Verification Assessment</span>
-            <span style="font-size: 1.05rem; font-weight: 700; color: {badge_color};">Fake Probability: <b>{fake_prob_pct}%</b></span>
+            <span style="font-size: 0.95rem; font-weight: 600; color: #64748b;">
+                P(Fake): <b style="color: #ef4444;">{fake_prob_pct}%</b> | P(Real): <b style="color: #22c55e;">{real_prob_pct}%</b>
+            </span>
         </div>
         <h2 style="color: {badge_color} !important; margin: 4px 0 12px 0; font-size: 2rem; border: none; padding: 0;">
             {icon} {final_label}
@@ -203,8 +244,8 @@ def render_four_independent_components(analysis_data: dict, source_text: str, in
             {short_explanation}
         </p>
         <div style="display: flex; flex-wrap: wrap; gap: 20px; font-size: 0.9rem; padding-top: 10px; border-top: 1px solid rgba(148, 163, 184, 0.2);">
-            <div><b>🏛️ News Source:</b> {publisher_name}</div>
-            <div><b>🌐 Verification:</b> {verification_note}</div>
+            <div><b>🏛️ Evaluated Source:</b> {publisher_name}</div>
+            <div><b>🌐 External Corroboration:</b> {verification_note}</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -212,7 +253,7 @@ def render_four_independent_components(analysis_data: dict, source_text: str, in
     # =============================================================
     # OPTIONAL EXPANDABLE SECTION: VIEW DETAILED ANALYSIS
     # =============================================================
-    with st.expander("🔍 View Detailed Analysis", expanded=False):
+    with st.expander("🔍 View Detailed Analysis & Evidence", expanded=False):
         if comp_d.get("has_conflict"):
             st.warning(f"⚠️ {comp_d.get('conflict_message', 'Conflicting evidence detected between stylistic model and external sources.')}")
             
@@ -230,7 +271,7 @@ def render_four_independent_components(analysis_data: dict, source_text: str, in
         # Linear SHAP Feature Attribution
         shap_features = comp_a.get("shap_features", [])
         if shap_features:
-            st.markdown("##### 📊 Top Feature Attributions (Linear Impact)")
+            st.markdown("##### 📊 Top Feature Attributions (Linear SHAP Impact)")
             fig_shap = plot_shap_bar(shap_features)
             if fig_shap:
                 st.pyplot(fig_shap)
@@ -254,12 +295,15 @@ def render_four_independent_components(analysis_data: dict, source_text: str, in
             for fc in fcs[:3]:
                 st.markdown(f"• **[{fc.get('fact_checker', 'Fact Checker')}]**: *{fc.get('rating', 'Evaluated')}* - {fc.get('claim', '')}")
                 if fc.get("review_url"):
-                    st.markdown(f"  [Read Full Debunk]({fc['review_url']})")
+                    st.markdown(f"  [Read Full Investigation]({fc['review_url']})")
                     
         if rel_news:
             st.markdown(f"##### 📰 Independent Corroborating News Coverage ({len(rel_news)} sources)")
             for art in rel_news:
                 st.markdown(f"• **[{art.get('publisher', 'News')}]** [{art.get('title', 'Article')}]({art.get('url', '#')}) (Relevance: {art.get('relevance_score', 0)}%)")
+        else:
+            st.markdown("##### 📰 Independent Corroborating News Coverage")
+            st.info("No sufficiently relevant corroboration was found in active news archives.")
                 
         st.markdown("---")
         col_act1, col_act2 = st.columns(2)
@@ -287,7 +331,7 @@ def render_four_independent_components(analysis_data: dict, source_text: str, in
                         data=pdf_bytes,
                         file_name=f"TruthLens_Report_{log_id if log_id else 'audit'}.pdf",
                         mime="application/pdf",
-                        key=f"dl_pdf_{log_id if log_id else 'tmp'}"
+                        key=f"dl_pdf_{log_id if log_id else 'tmp'}_{input_mode}"
                     )
             except Exception as e:
                 st.warning(f"PDF export temporarily unavailable: {e}")
@@ -297,11 +341,11 @@ def render_four_independent_components(analysis_data: dict, source_text: str, in
             if log_id:
                 col_fb1, col_fb2 = st.columns(2)
                 with col_fb1:
-                    if st.button("👍 Correct Verdict", key=f"fb_ok_{log_id}"):
+                    if st.button("👍 Correct Assessment", key=f"fb_ok_{log_id}_{input_mode}"):
                         save_feedback(log_id, "Correct")
                         st.success("Telemetry logged: Correct")
                 with col_fb2:
-                    if st.button("👎 Incorrect Verdict", key=f"fb_bad_{log_id}"):
+                    if st.button("👎 Incorrect Assessment", key=f"fb_bad_{log_id}_{input_mode}"):
                         save_feedback(log_id, "Incorrect")
                         st.warning("Telemetry logged: Incorrect")
             else:
@@ -352,7 +396,7 @@ if selected_page == "🏠 Home":
         In --> B[B. Source Credibility Assessment]
         In --> C[C. External News Verification]
         A & B & C --> D[D. Final Evidence Assessment]
-        D --> Out[Likely Reliable | Likely Misleading | Needs Verification]
+        D --> Out[Likely Reliable | Likely Misleading | Needs Further Verification]
     ```
     """)
     
@@ -412,7 +456,7 @@ elif selected_page == "🔍 Analyse News":
                     username=st.session_state.username,
                     language=res["language_info"]["language"]
                 )
-                st.session_state.active_analysis = {
+                st.session_state.text_active_analysis = {
                     "res": res,
                     "text": input_text,
                     "input_mode": "Text",
@@ -420,10 +464,10 @@ elif selected_page == "🔍 Analyse News":
                 }
                 st.query_params["id"] = str(log_id)
                 
-    if st.session_state.active_analysis and st.session_state.active_analysis.get("input_mode") == "Text":
+    if st.session_state.text_active_analysis:
         render_four_independent_components(
-            st.session_state.active_analysis,
-            st.session_state.active_analysis["text"],
+            st.session_state.text_active_analysis,
+            st.session_state.text_active_analysis["text"],
             "Text Claim"
         )
         
@@ -438,7 +482,7 @@ elif selected_page == "🌐 URL Verification":
     
     url_input = st.text_input(
         "Paste Article URL:",
-        placeholder="e.g. https://www.thehindu.com/incoming/.../article71683027.ece",
+        placeholder="e.g. https://www.thehindu.com/news/national/.../article.ece",
         key="url_input_box"
     )
     
@@ -446,16 +490,20 @@ elif selected_page == "🌐 URL Verification":
         if not url_input.strip():
             st.warning("Please paste a valid article URL.")
         else:
-            with st.spinner("Extracting article headline, body, and metadata using Trafilatura..."):
+            # Invalidate any old URL analysis
+            st.session_state.url_active_analysis = None
+            if "id" in st.query_params:
+                del st.query_params["id"]
+                
+            with st.spinner("Validating and extracting article content..."):
                 scraped = scrape_article(url_input)
                 
-            # If extraction failed or paywall blocked content
             if not scraped["success"]:
-                st.error("Article extraction unsuccessful. Please paste the article text manually.")
-                st.info("The target web page is either protected by an aggressive subscription paywall, bot protection, or contains insufficient text.")
+                st.error(scraped.get("error", "Article extraction unsuccessful. Please paste the article text manually."))
+                st.info("The target web page is either protected by a subscription paywall, anti-bot shield, requires JavaScript, or contains insufficient text.")
             else:
                 extracted_text = scraped["full_text"]
-                st.success(f"Article Identified: **{scraped['title']}** (Domain: `{scraped['domain']}`, {scraped['word_count']} words)")
+                st.success(f"Article Identified: **{scraped['title']}** (Publisher: `{scraped['publisher']}`, Domain: `{scraped['domain']}`, {scraped['word_count']} words)")
                 st.text_area("EXTRACTED ARTICLE PREVIEW", value=extracted_text, height=130, disabled=True, key="extracted_preview_area")
                 
                 with st.spinner("Executing four independent analysis components..."):
@@ -463,7 +511,8 @@ elif selected_page == "🌐 URL Verification":
                         headline=scraped["title"] if scraped["title"] else extracted_text[:120],
                         full_text=extracted_text,
                         google_key=st.session_state.factcheck_key,
-                        newsapi_key=st.session_state.newsapi_key
+                        newsapi_key=st.session_state.newsapi_key,
+                        exclude_domain_or_publisher=scraped["domain"]
                     )
                     res = analyze_four_components(
                         text=extracted_text,
@@ -480,7 +529,7 @@ elif selected_page == "🌐 URL Verification":
                         username=st.session_state.username,
                         language=res["language_info"]["language"]
                     )
-                    st.session_state.active_analysis = {
+                    st.session_state.url_active_analysis = {
                         "res": res,
                         "text": extracted_text,
                         "input_mode": "URL",
@@ -489,12 +538,12 @@ elif selected_page == "🌐 URL Verification":
                     }
                     st.query_params["id"] = str(log_id)
                     
-    if st.session_state.active_analysis and st.session_state.active_analysis.get("input_mode") == "URL":
+    if st.session_state.url_active_analysis:
         render_four_independent_components(
-            st.session_state.active_analysis,
-            st.session_state.active_analysis["text"],
+            st.session_state.url_active_analysis,
+            st.session_state.url_active_analysis["text"],
             "URL Scraper",
-            domain_info=st.session_state.active_analysis.get("domain", "")
+            domain_info=st.session_state.url_active_analysis.get("domain", "")
         )
         
     render_academic_disclaimer()
@@ -508,30 +557,70 @@ elif selected_page == "📷 Image Analysis":
     
     st.info("ℹ️ **Methodological Scope**: This module performs Optical Character Recognition (OCR) to extract text from screenshots. It classifies the extracted claim stylistically and cross-references it with news archives. It does not perform digital photo-forensics, EXIF tampering analysis, or deepfake detection.")
     
-    uploaded_img = st.file_uploader("Upload News Screenshot (PNG, JPG, JPEG):", type=["png", "jpg", "jpeg"], key="img_uploader")
+    uploaded_img = st.file_uploader(
+        "Upload News Screenshot (PNG, JPG, JPEG):",
+        type=["png", "jpg", "jpeg", "webp"],
+        key="img_uploader"
+    )
     
-    if "ocr_extracted_text" not in st.session_state:
+    # Image synchronization: track SHA-256 hash
+    if uploaded_img is None:
+        # User removed the image or hasn't uploaded yet
+        st.session_state.ocr_image_hash = ""
         st.session_state.ocr_extracted_text = ""
+        st.session_state.ocr_source = None
+        st.session_state.ocr_error = None
+        st.session_state.image_active_analysis = None
+        if "id" in st.query_params:
+            del st.query_params["id"]
+    else:
+        img_bytes = uploaded_img.getvalue()
+        current_hash = compute_image_hash(img_bytes)
         
-    if uploaded_img:
+        # If user uploaded a DIFFERENT image, invalidate previous extraction and analysis
+        if current_hash != st.session_state.ocr_image_hash:
+            st.session_state.ocr_image_hash = current_hash
+            st.session_state.ocr_extracted_text = ""
+            st.session_state.ocr_source = None
+            st.session_state.ocr_error = None
+            st.session_state.image_active_analysis = None
+            if "id" in st.query_params:
+                del st.query_params["id"]
+
         st.image(uploaded_img, width=420, caption="Uploaded Document Preview")
         
-        if st.button("EXTRACT TEXT FROM IMAGE", type="secondary", key="btn_run_ocr"):
-            with st.spinner("Executing Optical Character Recognition (OCR)..."):
-                extracted_text, ocr_err = extract_text_from_image(
-                    uploaded_img.getvalue(),
-                    api_key=st.session_state.ocr_key
-                )
-                
-            if ocr_err:
-                st.error(f"OCR Error: {ocr_err}")
-            elif not extracted_text or len(extracted_text.split()) < 5:
-                st.warning("Article extraction unsuccessful. Please paste the article text manually.")
-            else:
-                st.session_state.ocr_extracted_text = extracted_text
-                st.success("Text extracted successfully! Please review and correct any OCR errors below before analysis.")
-                
+        col_ocr1, col_ocr2 = st.columns([2, 3])
+        with col_ocr1:
+            if st.button("EXTRACT TEXT FROM IMAGE", type="secondary", key="btn_run_ocr"):
+                # Invalidate any stale prediction
+                st.session_state.image_active_analysis = None
+                if "id" in st.query_params:
+                    del st.query_params["id"]
+                    
+                with st.spinner("Executing Optical Character Recognition (OCR)..."):
+                    extracted_text, ocr_err, ocr_src = extract_text_from_image(
+                        img_bytes,
+                        api_key=st.session_state.ocr_key
+                    )
+                    
+                if ocr_err:
+                    st.session_state.ocr_error = ocr_err
+                    st.session_state.ocr_extracted_text = ""
+                    st.session_state.ocr_source = None
+                else:
+                    st.session_state.ocr_error = None
+                    st.session_state.ocr_extracted_text = extracted_text
+                    st.session_state.ocr_source = ocr_src
+                    
+        # Display OCR extraction error if present
+        if st.session_state.ocr_error:
+            st.error(st.session_state.ocr_error)
+            
+        # Display OCR extraction success if present
         if st.session_state.ocr_extracted_text:
+            src_label = st.session_state.ocr_source or "OCR Engine"
+            st.success(f"Text extracted successfully via **{src_label}**! Please review and correct any OCR errors below before analysis.")
+            
             edited_text = st.text_area(
                 "Review & Edit Extracted OCR Text:",
                 value=st.session_state.ocr_extracted_text,
@@ -542,6 +631,8 @@ elif selected_page == "📷 Image Analysis":
             if st.button("RUN TRUTHLENS DIAGNOSTICS", type="primary", key="btn_run_img_verify"):
                 if not edited_text.strip():
                     st.warning("Please provide extracted or corrected text to analyze.")
+                elif len(edited_text.strip().split()) < 5:
+                    st.warning("Article text is too brief for analysis (minimum 5 words required).")
                 else:
                     with st.spinner("Evaluating extracted claim across all components..."):
                         fc_result = query_fact_checking_pipeline(
@@ -565,18 +656,24 @@ elif selected_page == "📷 Image Analysis":
                             username=st.session_state.username,
                             language=res["language_info"]["language"]
                         )
-                        st.session_state.active_analysis = {
+                        st.session_state.image_active_analysis = {
                             "res": res,
                             "text": edited_text,
                             "input_mode": "Image OCR",
+                            "image_hash": current_hash,
                             "log_id": log_id
                         }
                         st.query_params["id"] = str(log_id)
                         
-    if st.session_state.active_analysis and st.session_state.active_analysis.get("input_mode") == "Image OCR":
+    # Only render results if an analysis is active AND belongs to the currently uploaded image
+    if (
+        st.session_state.image_active_analysis
+        and uploaded_img is not None
+        and st.session_state.image_active_analysis.get("image_hash") == st.session_state.ocr_image_hash
+    ):
         render_four_independent_components(
-            st.session_state.active_analysis,
-            st.session_state.active_analysis["text"],
+            st.session_state.image_active_analysis,
+            st.session_state.image_active_analysis["text"],
             "Image OCR"
         )
         
@@ -652,7 +749,9 @@ elif selected_page == "📜 Analysis History":
         if st.button("🗑️ Clear Logs", type="secondary", key="btn_clear_hist"):
             target = st.session_state.username if user_filter != "All Users" else None
             clear_logs(target)
-            st.session_state.active_analysis = None
+            st.session_state.text_active_analysis = None
+            st.session_state.url_active_analysis = None
+            st.session_state.image_active_analysis = None
             st.query_params.clear()
             st.success("Selected history cleared.")
             st.rerun()
@@ -686,18 +785,19 @@ elif selected_page == "📊 Analytics Dashboard":
     else:
         metrics_data = {}
         
-    if not Path(METRICS_JSON_PATH).exists() or not metrics_data.get("best_metrics"):
+    best_metrics = metrics_data.get("best_metrics", {})
+    if not best_metrics:
         st.info("ℹ️ Model evaluation metrics are not yet available. Please run `python train_model.py` to generate empirical evaluation metrics.")
     else:
         col_k1, col_k2, col_k3, col_k4 = st.columns(4)
         with col_k1:
-            st.metric("Model Test Accuracy", f"{best_metrics['accuracy']}%", delta="Held-out 20% test")
+            st.metric("Model Test Accuracy", f"{best_metrics.get('accuracy', 'N/A')}%", delta="Held-out 20% test")
         with col_k2:
-            st.metric("Test Precision", f"{best_metrics['precision']}%")
+            st.metric("Test Precision", f"{best_metrics.get('precision', 'N/A')}%")
         with col_k3:
-            st.metric("Test Recall", f"{best_metrics['recall']}%")
+            st.metric("Test Recall", f"{best_metrics.get('recall', 'N/A')}%")
         with col_k4:
-            st.metric("Test F1-Score", f"{best_metrics['f1_score']}%")
+            st.metric("Test F1-Score", f"{best_metrics.get('f1_score', 'N/A')}%")
         
     st.markdown("---")
     
@@ -787,14 +887,18 @@ elif selected_page == "ℹ️ About the Project":
     
     st.markdown("""
     ### Project Overview
-    **TruthLens** is a publication-grade B.Tech final-year major project developed to address 
-    information pollution, online propaganda, and viral misinformation using rigorous Machine Learning and NLP.
+    **TruthLens** is an applied machine learning and NLP system engineered to detect online misinformation, 
+    evaluate editorial authenticity, and explain predictive reasoning through transparent Explainable AI (XAI).
     
     ### Four Independent Analysis Components
-    1. **A. Machine Learning Classification**: Unbiased, calibrated linear SVM ($P(\\text{Real})$ and $P(\\text{Fake})$).
-    2. **B. Source Credibility Assessment**: Evaluates domain authority and publisher reputation. Never determines truth alone.
-    3. **C. External News Verification**: Real-time ClaimReview debunks and live multi-source news coverage with semantic relevance scoring.
-    4. **D. Final Evidence Assessment**: 3-tier verdict synthesis with explicit conflict detection.
+    1. **A. Machine Learning Classification**: Calibrated Linear Support Vector Classifier with Platt Sigmoid Scaling. Evaluates linguistic structure without external bias ($P(\\text{Real})$ and $P(\\text{Fake})$).
+    2. **B. Source Credibility Assessment**: Evaluates publisher domain authority and sensationalism/clickbait markers independently.
+    3. **C. External News Verification**: Cross-references claims against verified ClaimReview debunk records and live multi-source coverage with strict entity alignment.
+    4. **D. Final Evidence Assessment**: 3-tier verdict synthesis (`Likely Reliable`, `Likely Misleading`, or `Needs Further Verification`) with automated conflict detection.
+    
+    ### Architectural Notes & Platform Observations
+    * **Browser Console Notice (`/api/v2/user/details 404`)**: When deployed on Streamlit Community Cloud, the browser console may show recurring `404` requests to `/api/v2/user/details`. This is an internal Streamlit Community Cloud telemetry call generated by the hosting platform's user-authentication wrapper. It does not originate from TruthLens application code and has zero effect on machine learning or verification functionality.
+    * **OCR Fallback Pipeline**: TruthLens employs local Tesseract OCR when available on the hosting container, paired with exponential backoff on cloud OCR endpoints to ensure uninterrupted text extraction from news screenshots.
     """)
     
     render_academic_disclaimer()
